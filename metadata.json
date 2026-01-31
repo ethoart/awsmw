@@ -1,0 +1,7 @@
+{
+  "name": "Milky Way OMS",
+  "description": "Enterprise-grade multi-tenant Order Management System with courier integration, inventory control, and return management.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

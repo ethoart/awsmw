@@ -1,0 +1,128 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Milky Way OMS | Enterprise</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --brand-primary: #2563eb;
+        --brand-secondary: #0f172a;
+        --bg-app: #f1f5f9;
+        --card-bg: #ffffff;
+        --border-color: #e2e8f0;
+      }
+      body { 
+        font-family: 'Plus Jakarta Sans', sans-serif; 
+        background-color: var(--bg-app); 
+        color: #334155; 
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+      ::-webkit-scrollbar { width: 4px; height: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+      
+      .modern-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 1.25rem;
+        box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        transition: all 0.2s ease;
+      }
+      .modern-card:hover {
+        box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.04);
+      }
+      .sidebar-item-active {
+        background-color: var(--brand-primary);
+        color: white !important;
+      }
+      .sidebar-item-active svg {
+        color: white !important;
+      }
+      .compact-table th {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #94a3b8;
+        padding: 0.75rem 1rem;
+      }
+      .compact-table td {
+        font-size: 13px;
+        padding: 0.75rem 1rem;
+      }
+      @keyframes slideIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
+      
+      /* STRICT PRINT OVERRIDES */
+      @media print {
+        body, html { 
+          background: white !important; 
+          overflow: visible !important;
+          height: auto !important;
+          width: 100% !important;
+        }
+        #root, .no-print { 
+          display: none !important; 
+        }
+        .print-only { 
+          display: block !important; 
+          width: 100% !important;
+          position: static !important;
+          visibility: visible !important;
+        }
+      }
+      .print-only { display: none; }
+
+      input::-webkit-outer-spin-button,
+      input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type=number] {
+        -moz-appearance: textfield;
+      }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1?external=react",
+    "recharts": "https://esm.sh/recharts@2.12.7?external=react,react-dom",
+    "react-barcode": "https://esm.sh/react-barcode@1.4.6?external=react,react-dom",
+    "react-qr-code": "https://esm.sh/react-qr-code@2.0.12?external=react",
+    "html5-qrcode": "https://esm.sh/html5-qrcode@2.3.8",
+    "@google/genai": "https://esm.sh/@google/genai@0.21.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "@netlify/functions": "https://esm.sh/@netlify/functions@^5.1.2",
+    "mongodb": "https://esm.sh/mongodb@^7.0.0",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "express": "https://esm.sh/express@^5.2.1",
+    "cors": "https://esm.sh/cors@^2.8.6",
+    "dotenv": "https://esm.sh/dotenv@^17.2.3",
+    "path": "https://esm.sh/path@^0.12.7",
+    "url": "https://esm.sh/url@^0.11.4",
+    "fs": "https://esm.sh/fs@^0.0.1-security"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
