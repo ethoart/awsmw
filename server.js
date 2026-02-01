@@ -60,7 +60,7 @@ async function getTenantDb(tenantId) {
 
 const FDE_ERRORS = {
   201: "Inactive Client",
-  202: "Invalid Order ID",
+  202: "Invalid Order ID (Numeric Required)",
   203: "Invalid Weight",
   204: "Invalid Parcel Description",
   205: "Invalid Name",
@@ -93,7 +93,6 @@ app.post('/api/login', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// CITIES
 app.get('/api/cities', async (req, res) => {
     try {
         const db = await connectCentral();
@@ -111,7 +110,6 @@ app.post('/api/cities', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// USERS
 app.get('/api/users', async (req, res) => {
     try {
         const { tenantId } = req.query;
@@ -139,7 +137,6 @@ app.delete('/api/users', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ORDERS
 app.get('/api/orders', async (req, res) => {
     try {
         const { tenantId, id, page, limit, search, status, productId, startDate, endDate } = req.query;
@@ -227,7 +224,6 @@ app.delete('/api/orders', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// CUSTOMER HISTORY
 app.get('/api/customer-history', async (req, res) => {
     try {
         const { phone, tenantId } = req.query;
@@ -278,20 +274,26 @@ app.post('/api/ship-order', async (req, res) => {
         
         if (!settings || !settings.courierApiKey) return res.status(400).json({ error: "Keys Missing" });
 
-        // Fardar Express (FDE) Protocol: Form-Data POST with specific required keys
+        // SANITIZATION: FDE often requires numeric Order ID for their internal logic
+        // Extracting only digits from our system ID to satisfy status 202 check
+        const fdeOrderId = order.id.replace(/\D/g, '').slice(-10) || Math.floor(Math.random() * 1000000000).toString();
+
         const formData = new URLSearchParams();
         formData.append('api_key', settings.courierApiKey.trim());
         formData.append('client_id', settings.courierClientId.trim());
-        formData.append('order_id', order.id.toString());
+        formData.append('order_id', fdeOrderId);
         formData.append('parcel_weight', order.parcelWeight || '1');
-        formData.append('parcel_description', order.parcelDescription || order.items[0]?.name || 'Standard Shipment');
+        formData.append('parcel_description', (order.parcelDescription || order.items[0]?.name || 'Standard Shipment').toString().slice(0, 50));
         formData.append('recipient_name', order.customerName.toString());
         formData.append('recipient_contact_1', order.customerPhone.replace(/\D/g, ''));
-        formData.append('recipient_contact_2', (order.customerPhone2 || '').replace(/\D/g, ''));
+        
+        const phone2 = (order.customerPhone2 || '').replace(/\D/g, '');
+        if (phone2) formData.append('recipient_contact_2', phone2);
+
         formData.append('recipient_address', order.customerAddress.toString());
         formData.append('recipient_city', (order.customerCity || 'Colombo').toString());
         formData.append('amount', Math.round(order.totalAmount).toString());
-        formData.append('exchange', '0'); // Default to Normal Parcel
+        formData.append('exchange', '0');
 
         const targetUrl = settings.courierMode === 'EXISTING_WAYBILL' 
             ? 'https://www.fdedomestic.com/api/parcel/existing_waybill_api_v1.php'
@@ -312,7 +314,7 @@ app.post('/api/ship-order', async (req, res) => {
         try {
             data = JSON.parse(rawText);
         } catch (err) {
-            return res.status(400).json({ error: `FDE Bridge Failure: ${rawText.slice(0, 150)}` });
+            return res.status(400).json({ error: `FDE Text: ${rawText.slice(0, 150)}` });
         }
 
         const status = Number(data.status);
@@ -327,7 +329,7 @@ app.post('/api/ship-order', async (req, res) => {
             await db.collection('orders').updateOne({ id: order.id }, { $set: clean(updated) });
             res.json(updated);
         } else {
-            res.status(400).json({ error: FDE_ERRORS[status] || `FDE Error ${status}: Handshake Refused` });
+            res.status(400).json({ error: FDE_ERRORS[status] || `FDE Status ${status}` });
         }
     } catch (e) { res.status(500).json({ error: `System Handshake Failure: ${e.message}` }); }
 });

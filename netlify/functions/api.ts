@@ -25,7 +25,7 @@ async function getConnectedClient(uri: string) {
 
 const FDE_ERRORS: Record<number, string> = {
   201: "Inactive Client",
-  202: "Invalid Order ID",
+  202: "Invalid Order ID (Numeric Required)",
   203: "Invalid Weight",
   204: "Invalid Parcel Description",
   205: "Invalid Name",
@@ -203,35 +203,26 @@ export const handler: Handler = async (event, context) => {
       }
     }
 
-    if (path === '/products') {
-        const productsCol = activeDb.collection('products');
-        if (method === 'GET') return { statusCode: 200, headers, body: JSON.stringify(await productsCol.find({ tenantId }).toArray()) };
-        if (method === 'POST') {
-            const { product } = bodyData;
-            await productsCol.updateOne({ id: product.id }, { $set: { ...product, tenantId } }, { upsert: true });
-            return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
-        }
-        if (method === 'DELETE') {
-            const id = event.queryStringParameters?.id;
-            await productsCol.deleteOne({ id });
-            return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
-        }
-    }
-
     if (path === '/ship-order' && method === 'POST') {
         const { order } = bodyData;
         const ordersCol = activeDb.collection('orders');
         if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing Keys" }) };
 
+        // SANITIZE: fde expects numeric order_id
+        const fdeOrderId = order.id.replace(/\D/g, '').slice(-10) || Math.floor(Math.random() * 1000000000).toString();
+
         const formData = new URLSearchParams();
         formData.append('api_key', tenantSettings.courierApiKey.trim());
         formData.append('client_id', tenantSettings.courierClientId.trim());
-        formData.append('order_id', order.id.toString());
+        formData.append('order_id', fdeOrderId);
         formData.append('parcel_weight', order.parcelWeight || '1');
-        formData.append('parcel_description', order.parcelDescription || order.items[0]?.name || 'Standard Shipment');
+        formData.append('parcel_description', (order.parcelDescription || order.items[0]?.name || 'Standard Shipment').toString().slice(0, 50));
         formData.append('recipient_name', order.customerName);
         formData.append('recipient_contact_1', order.customerPhone.replace(/\D/g, ''));
-        formData.append('recipient_contact_2', (order.customerPhone2 || '').replace(/\D/g, ''));
+        
+        const phone2 = (order.customerPhone2 || '').replace(/\D/g, '');
+        if (phone2) formData.append('recipient_contact_2', phone2);
+
         formData.append('recipient_address', order.customerAddress);
         formData.append('recipient_city', order.customerCity || 'Colombo');
         formData.append('amount', Math.round(order.totalAmount).toString());
@@ -256,7 +247,7 @@ export const handler: Handler = async (event, context) => {
         try {
             data = JSON.parse(rawText);
         } catch(e) {
-            return { statusCode: 400, headers, body: JSON.stringify({ error: `FDE Bridge Failure: ${rawText.slice(0, 100)}` }) };
+            return { statusCode: 400, headers, body: JSON.stringify({ error: `FDE Text Response: ${rawText.slice(0, 100)}` }) };
         }
 
         const status = Number(data.status);

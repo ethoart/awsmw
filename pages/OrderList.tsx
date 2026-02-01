@@ -131,7 +131,7 @@ export const OrderList: React.FC<OrderListProps> = ({
         const order = orders.find(o => o.id === id);
         
         if (order) {
-            setBulkProgressMsg(`TRANSMITTING ${i+1}/${targetIds.length}: ${order.customerName}`);
+            setBulkProgressMsg(`SHIPPING ${i+1}/${targetIds.length}: ${order.customerName}`);
             try {
                 // SEQUENTIAL DISPATCH with robust error trapping
                 await db.shipOrder(order, tenantId);
@@ -141,8 +141,8 @@ export const OrderList: React.FC<OrderListProps> = ({
                 lastError = err.message;
                 console.error(`FDE Handshake failed for ${order.id}:`, err);
             }
-            // 600ms COOLDOWN: Essential for legacy Courier PHP backends to process each record
-            await new Promise(r => setTimeout(r, 600));
+            // 800ms COOLDOWN: Crucial for legacy FDE PHP backend to stabilize between records
+            await new Promise(r => setTimeout(r, 800));
         }
     }
 
