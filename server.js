@@ -119,6 +119,53 @@ app.post('/api/login', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// CITIES
+app.get('/api/cities', async (req, res) => {
+    try {
+        const db = await connectCentral();
+        const cityDoc = await db.collection('global_cities').findOne({ id: 'master_list' });
+        res.json({ cities: cityDoc?.cities || [] });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/cities', async (req, res) => {
+    try {
+        const db = await connectCentral();
+        const { cities } = req.body;
+        await db.collection('global_cities').updateOne({ id: 'master_list' }, { $set: { cities } }, { upsert: true });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// USERS
+app.get('/api/users', async (req, res) => {
+    try {
+        const { tenantId } = req.query;
+        const db = await connectCentral();
+        const users = await db.collection('users').find({ tenantId }).toArray();
+        res.json(users.map(clean));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/users', async (req, res) => {
+    try {
+        const user = req.body;
+        const db = await connectCentral();
+        await db.collection('users').updateOne({ id: user.id }, { $set: clean(user) }, { upsert: true });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/users', async (req, res) => {
+    try {
+        const { id } = req.query;
+        const db = await connectCentral();
+        await db.collection('users').deleteOne({ id });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ORDERS
 app.get('/api/orders', async (req, res) => {
     try {
         const { tenantId, id, page, limit, search, status, productId, startDate, endDate } = req.query;
@@ -220,6 +267,31 @@ app.delete('/api/orders', async (req, res) => {
         }
 
         res.status(400).json({ error: 'No deletion target identified.' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// CUSTOMER HISTORY
+app.get('/api/customer-history', async (req, res) => {
+    try {
+        const { phone, tenantId } = req.query;
+        const db = await getTenantDb(tenantId);
+        const last8 = phone.slice(-8);
+        const count = await db.collection('orders').countDocuments({ customerPhone: { $regex: last8 + "$" } });
+        const returns = await db.collection('orders').countDocuments({ 
+            customerPhone: { $regex: last8 + "$" }, 
+            status: { $in: ['RETURNED', 'REJECTED', 'RETURN_COMPLETED'] } 
+        });
+        res.json({ count, returns });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/customer-history-detailed', async (req, res) => {
+    try {
+        const { phone, tenantId } = req.query;
+        const db = await getTenantDb(tenantId);
+        const last8 = phone.slice(-8);
+        const all = await db.collection('orders').find({ customerPhone: { $regex: last8 + "$" } }).sort({ createdAt: -1 }).toArray();
+        res.json(all.map(clean));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

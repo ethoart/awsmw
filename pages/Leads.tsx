@@ -68,7 +68,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
   }, [manualForm.phone, tenantId]);
 
   const handleManualSubmit = async () => {
-    if (!manualForm.name || !manualForm.phone || !manualForm.productId) return alert("System requires full identity and SKU.");
+    if (!manualForm.name || !manualForm.phone || !manualForm.productId || !manualForm.address) return alert("CRITICAL: Name, Phone, Address, and SKU are mandatory.");
     
     const isExistingMode = tenant?.settings.courierMode === CourierMode.EXISTING_WAYBILL;
     if (isExistingMode && !manualForm.trackingNumber) return alert("Existing Waybill ID is mandatory for this cluster mode.");
@@ -115,14 +115,16 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
     const reader = new FileReader();
     reader.onload = (event) => {
         const text = event.target?.result as string;
-        // The helper parseCSV already handles basic cleaning
-        const parsed = parseCSV(text);
-        // STRICT FILTER: Remove any records where Name, Phone, or Address are still empty
-        const cleaned = parsed.filter(l => l.name && l.phone && l.address && l.name.length > 1);
-        setPendingLeads(cleaned);
-        if (cleaned.length < parsed.length) {
-            alert(`Filtered ${parsed.length - cleaned.length} incomplete records.`);
+        const cleaned = parseCSV(text);
+        
+        if (cleaned.length === 0) {
+            alert("UPLOAD FAILED: No valid records found. Ensure CSV has Name, Address, and Phone columns.");
+            return;
         }
+
+        setPendingLeads(cleaned);
+        setMessage({ text: `${cleaned.length} valid records indexed.`, type: 'info' });
+        setTimeout(() => setMessage(null), 5000);
     };
     reader.readAsText(file);
   };
@@ -179,7 +181,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
           </div>
         </div>
         {message && (
-            <div className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-emerald-600 text-white text-[11px] font-black uppercase tracking-widest shadow-xl animate-bounce">
+            <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl animate-bounce ${message.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
                 <CheckCircle2 size={16}/> {message.text}
             </div>
         )}
