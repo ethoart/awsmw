@@ -106,6 +106,7 @@ export const handler: Handler = async (event, context) => {
         try { bodyData = JSON.parse(event.body); } catch(e) {}
     }
 
+    // HARDENED TENANT EXTRACTION
     const tenantId = event.queryStringParameters?.tenantId || (bodyData as any).tenantId;
     let activeDb = centralDb;
     let tenantSettings = null;
@@ -178,6 +179,8 @@ export const handler: Handler = async (event, context) => {
       }
       if (method === 'DELETE') {
         const { id, purge } = event.queryStringParameters || {};
+        if (!tenantId) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Tenant context missing.' }) };
+
         if (purge === 'true') {
           const result = await ordersCol.deleteMany({ tenantId });
           return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
@@ -187,7 +190,7 @@ export const handler: Handler = async (event, context) => {
           const result = await ordersCol.deleteMany({ id: { $in: ids }, tenantId });
           return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
         }
-        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing target' }) };
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing deletion target.' }) };
       }
     }
 
@@ -209,7 +212,7 @@ export const handler: Handler = async (event, context) => {
     if (path === '/ship-order' && method === 'POST') {
         const { order } = bodyData as any;
         const ordersCol = activeDb.collection('orders');
-        if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing keys in Cluster Settings." }) };
+        if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Courier configuration missing." }) };
 
         const cleanAmount = Math.round(order.totalAmount).toString();
         const formData = new URLSearchParams();

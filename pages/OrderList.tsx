@@ -39,6 +39,7 @@ export const OrderList: React.FC<OrderListProps> = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkProgressMsg, setBulkProgressMsg] = useState('');
 
   useEffect(() => {
     setCurrentPage(1);
@@ -99,51 +100,68 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`CRITICAL: This will permanently wipe ${selectedIds.length} registry entries. Proceed?`)) return;
+    if (!confirm(`CRITICAL: This will permanently wipe ${selectedIds.length} nodes. Proceed?`)) return;
     setBulkProcessing(true);
+    setBulkProgressMsg('INITIATING WIPE...');
     try {
-      // Ensure tenantId is passed for correct DB context
       await db.deleteOrder(selectedIds.join(','), tenantId);
       setSelectedIds([]);
       await loadData();
       if (onRefresh) onRefresh();
-      alert(`Wipe Protocol Successful: ${selectedIds.length} nodes removed.`);
+      alert(`Wipe Successful: ${selectedIds.length} records purged.`);
     } catch (e: any) {
-      alert(`Wipe Failed: ${e.message}`);
-    } finally { setBulkProcessing(false); }
+      alert(`Protocol Failure: ${e.message}`);
+    } finally { 
+      setBulkProcessing(false);
+      setBulkProgressMsg('');
+    }
   };
 
   const handleBulkShip = async () => {
-    if (!confirm(`Logistics Sync: Transmit ${selectedIds.length} confirmed orders?`)) return;
+    if (!confirm(`Verify: Transmit ${selectedIds.length} orders to Logistics?`)) return;
     setBulkProcessing(true);
+    
     let successCount = 0;
     let failCount = 0;
-    let errors: string[] = [];
+    const errors: string[] = [];
 
-    // Run shipping in a loop to handle each individually so one failure doesn't stop others
-    for (const id of selectedIds) {
+    // Clone selected IDs to iterate
+    const targetIds = [...selectedIds];
+
+    for (let i = 0; i < targetIds.length; i++) {
+        const id = targetIds[i];
         const order = orders.find(o => o.id === id);
-        if (order && (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.PENDING || order.status === OrderStatus.OPEN_LEAD)) {
+        
+        if (order) {
+            setBulkProgressMsg(`TRANSMITTING ${i + 1}/${targetIds.length}: ${order.customerName}...`);
+            
             try {
+                // Perform individual ship handshake
                 await db.shipOrder(order, tenantId);
                 successCount++;
             } catch (err: any) {
                 failCount++;
                 errors.push(`${order.customerName}: ${err.message}`);
+                console.error(`Handshake failed for ${order.id}:`, err);
             }
+            
+            // Short delay to respect API rate limits and connection stability
+            await new Promise(r => setTimeout(r, 200));
         }
     }
 
+    setBulkProcessing(false);
+    setBulkProgressMsg('');
+    
     if (failCount > 0) {
-        alert(`Bulk Dispatch Result:\n- Success: ${successCount}\n- Failed: ${failCount}\n\nLast error recorded: ${errors[errors.length - 1]}`);
+        alert(`Bulk Dispatch Complete.\n\n- SUCCESS: ${successCount}\n- FAILED: ${failCount}\n\nLast error: ${errors[errors.length - 1]}`);
     } else {
-        alert(`Logistics Handshake Success: ${successCount} Waybills generated.`);
+        alert(`Logistics Protocol Success: ${successCount} Waybills Assigned.`);
     }
     
     setSelectedIds([]);
     await loadData();
     if (onRefresh) onRefresh();
-    setBulkProcessing(false);
   };
 
   const toggleSelectAll = () => {
@@ -172,10 +190,13 @@ export const OrderList: React.FC<OrderListProps> = ({
         <div className="absolute top-0 left-0 right-0 z-20 bg-slate-950 text-white p-4 flex items-center justify-between shadow-2xl rounded-b-2xl border-b border-white/10">
           <div className="flex items-center gap-4 ml-4">
               {bulkProcessing ? <Loader2 className="animate-spin text-blue-400" size={20}/> : <CheckSquare className="text-blue-500" size={20}/>}
-              <span className="text-xs font-black uppercase">{selectedIds.length} Nodes Locked</span>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase tracking-widest">{selectedIds.length} Nodes Locked</span>
+                {bulkProgressMsg && <span className="text-[8px] font-bold text-blue-400 uppercase animate-pulse">{bulkProgressMsg}</span>}
+              </div>
           </div>
           <div className="flex gap-2">
-            {(status === 'ALL' || status === OrderStatus.CONFIRMED || status === OrderStatus.OPEN_LEAD) && (
+            {(status === 'ALL' || status === OrderStatus.CONFIRMED || status === OrderStatus.PENDING || status === OrderStatus.OPEN_LEAD) && (
               <button disabled={bulkProcessing} onClick={handleBulkShip} className="bg-blue-600 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:bg-blue-700 transition-all disabled:opacity-50">
                 <Truck size={14} /> Bulk Ship
               </button>
@@ -188,7 +209,7 @@ export const OrderList: React.FC<OrderListProps> = ({
             <button disabled={bulkProcessing} onClick={handleBulkDelete} className="bg-rose-600 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-rose-700 transition-all disabled:opacity-50">
               <Trash2 size={14} /> Wipe Registry
             </button>
-            <button onClick={() => setSelectedIds([])} className="bg-white/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase">Cancel</button>
+            <button disabled={bulkProcessing} onClick={() => setSelectedIds([])} className="bg-white/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase disabled:opacity-30">Cancel</button>
           </div>
         </div>
       )}
