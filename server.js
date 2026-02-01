@@ -79,7 +79,6 @@ async function adjustInventory(db, items, tenantId, type = 'DEDUCT') {
         let batches = [...product.batches];
 
         if (type === 'DEDUCT') {
-            // FIFO Deduction
             for (let i = 0; i < batches.length; i++) {
                 if (needed <= 0) break;
                 if (batches[i].quantity > 0) {
@@ -89,7 +88,6 @@ async function adjustInventory(db, items, tenantId, type = 'DEDUCT') {
                 }
             }
         } else {
-            // Restock - Add back to the latest batch or create a restock batch
             if (batches.length > 0) {
                 batches[batches.length - 1].quantity += needed;
             } else {
@@ -174,7 +172,6 @@ app.post('/api/orders', async (req, res) => {
         const col = db.collection('orders');
 
         if (orders) {
-            // Bulk injection (usually from Leads CSV)
             const ops = orders.map(o => ({ 
                 updateOne: { 
                     filter: { id: o.id }, 
@@ -183,30 +180,46 @@ app.post('/api/orders', async (req, res) => {
                 } 
             }));
             await col.bulkWrite(ops);
-            
-            // If injecting as CONFIRMED directly, deduct stock
             for (const o of orders) {
                 if (o.status === 'CONFIRMED' || o.status === 'SHIPPED') {
                     await adjustInventory(db, o.items, tenantId, 'DEDUCT');
                 }
             }
         } else if (order) {
-            // Single update (usually from Order Detail)
             const existing = await col.findOne({ id: order.id });
             const oldStatus = existing?.status;
             const newStatus = order.status;
-
-            // Trigger stock deduction when moving TO confirmed/shipped from pending states
             const isBecomingConfirmed = ['PENDING', 'OPEN_LEAD', 'NO_ANSWER', 'REJECTED', 'HOLD'].includes(oldStatus) && 
                                        ['CONFIRMED', 'SHIPPED'].includes(newStatus);
 
             if (isBecomingConfirmed) {
                 await adjustInventory(db, order.items, tenantId, 'DEDUCT');
             }
-
             await col.updateOne({ id: order.id }, { $set: { ...clean(order), tenantId } }, { upsert: true });
         }
         res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/orders', async (req, res) => {
+    try {
+        const { tenantId, id, purge } = req.query;
+        if (!tenantId) return res.status(400).json({ error: 'Tenant context required.' });
+        const db = await getTenantDb(tenantId);
+        const col = db.collection('orders');
+
+        if (purge === 'true') {
+            const result = await col.deleteMany({ tenantId });
+            return res.json({ success: true, count: result.deletedCount });
+        }
+
+        if (id) {
+            const ids = id.split(',');
+            const result = await col.deleteMany({ id: { $in: ids }, tenantId });
+            return res.json({ success: true, count: result.deletedCount });
+        }
+
+        res.status(400).json({ error: 'No deletion target identified.' });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -218,11 +231,9 @@ app.post('/api/process-return', async (req, res) => {
         const order = await ordersCol.findOne({ $or: [{ id: trackingOrId }, { trackingNumber: trackingOrId }] });
         
         if (order) {
-            // Avoid double restocking
             if (order.status !== 'RETURN_COMPLETED') {
                 await adjustInventory(db, order.items, tenantId, 'RESTOCK');
             }
-
             const updated = { 
                 ...order, 
                 status: 'RETURN_COMPLETED',
@@ -274,11 +285,9 @@ app.post('/api/ship-order', async (req, res) => {
 
         if (Number(data.status) === 200) {
             const existing = await db.collection('orders').findOne({ id: order.id });
-            // If shipping from non-confirmed state, deduct inventory
             if (!['CONFIRMED', 'SHIPPED'].includes(existing?.status)) {
                 await adjustInventory(db, order.items, tenantId, 'DEDUCT');
             }
-
             const updatedOrder = { 
                 ...order, 
                 status: 'SHIPPED', 
@@ -293,8 +302,6 @@ app.post('/api/ship-order', async (req, res) => {
         }
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
-// ... (remaining tenant/user routes same as before)
 
 app.get('/api/tenants', async (req, res) => {
     try {

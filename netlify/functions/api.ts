@@ -121,7 +121,6 @@ export const handler: Handler = async (event, context) => {
         const id = event.queryStringParameters?.id;
         if (id) return { statusCode: 200, headers, body: JSON.stringify(await ordersCol.findOne({ id })) };
 
-        // Server-Side Pagination & Filtering
         const page = parseInt(event.queryStringParameters?.page || '1');
         const limit = parseInt(event.queryStringParameters?.limit || '50');
         const search = event.queryStringParameters?.search || '';
@@ -141,17 +140,12 @@ export const handler: Handler = async (event, context) => {
             query.status = status;
           }
         }
-
-        if (productId) {
-          query['items.productId'] = productId;
-        }
-
+        if (productId) query['items.productId'] = productId;
         if (startDate || endDate) {
           query.createdAt = {};
           if (startDate) query.createdAt.$gte = startDate;
           if (endDate) query.createdAt.$lte = endDate + 'T23:59:59';
         }
-
         if (search) {
           query.$or = [
             { id: { $regex: search, $options: 'i' } },
@@ -162,17 +156,9 @@ export const handler: Handler = async (event, context) => {
         }
 
         const total = await ordersCol.countDocuments(query);
-        const data = await ordersCol.find(query)
-          .sort({ createdAt: -1 })
-          .skip((page - 1) * limit)
-          .limit(limit)
-          .toArray();
+        const data = await ordersCol.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray();
 
-        return { 
-          statusCode: 200, 
-          headers, 
-          body: JSON.stringify({ data, total, page, limit }) 
-        };
+        return { statusCode: 200, headers, body: JSON.stringify({ data, total, page, limit }) };
       }
       if (method === 'POST') {
         const { order, orders } = JSON.parse(event.body || '{}');
@@ -185,9 +171,17 @@ export const handler: Handler = async (event, context) => {
         return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
       }
       if (method === 'DELETE') {
-        const id = event.queryStringParameters?.id;
-        await ordersCol.deleteOne({ id });
-        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+        const { id, purge } = event.queryStringParameters || {};
+        if (purge === 'true') {
+          const result = await ordersCol.deleteMany({ tenantId });
+          return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
+        }
+        if (id) {
+          const ids = id.split(',');
+          const result = await ordersCol.deleteMany({ id: { $in: ids }, tenantId });
+          return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
+        }
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing target' }) };
       }
     }
 
