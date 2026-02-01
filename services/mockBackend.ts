@@ -74,10 +74,8 @@ class BackendService {
     const actualParams = typeof params === 'string' ? { tenantId: params } : params;
     const res = await this.request('/orders', 'GET', null, actualParams);
     
-    // Handle specific order lookup
     if (actualParams.id) return { data: res ? [res] : [], total: res ? 1 : 0 };
     
-    // Normalize response: Server might return array (old) or { data, total } (new)
     if (Array.isArray(res)) {
       return { data: res, total: res.length };
     }
@@ -99,6 +97,11 @@ class BackendService {
 
   async deleteOrder(orderId: string, tenantId: string): Promise<void> {
     await this.request('/orders', 'DELETE', null, { id: orderId, tenantId });
+  }
+
+  async purgeOrders(tenantId: string): Promise<number> {
+    const res = await this.request('/orders', 'DELETE', null, { tenantId, purge: 'true' });
+    return res.count || 0;
   }
   
   async createOrders(orders: Order[]): Promise<void> {

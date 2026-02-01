@@ -245,9 +245,16 @@ app.post('/api/orders', async (req, res) => {
 
 app.delete('/api/orders', async (req, res) => {
     try {
-        const { tenantId, id } = req.query;
+        const { tenantId, id, purge } = req.query;
         const db = await getTenantDb(tenantId);
-        await db.collection('orders').deleteOne({ id });
+        const col = db.collection('orders');
+        
+        if (purge === 'true') {
+            const result = await col.deleteMany({ tenantId });
+            return res.json({ success: true, count: result.deletedCount });
+        }
+        
+        await col.deleteOne({ id });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });

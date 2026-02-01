@@ -73,28 +73,31 @@ export const DevAdmin: React.FC = () => {
     } catch (e: any) { alert(e.message); } finally { setLoading(false); }
   };
 
+  // Robust Status Intelligence for various CSV exports
   const mapLegacyStatus = (s: string): OrderStatus => {
     const status = (s || '').trim().toUpperCase();
-    if (status.includes('PENDING')) return OrderStatus.PENDING;
-    if (status.includes('CONFIRM')) return OrderStatus.CONFIRMED;
-    if (status.includes('SHIP')) return OrderStatus.SHIPPED;
-    if (status.includes('DELIVERED')) return OrderStatus.DELIVERED;
-    if (status.includes('RETURN')) return OrderStatus.RETURNED;
-    if (status.includes('REJECT')) return OrderStatus.REJECTED;
-    if (status.includes('HOLD')) return OrderStatus.HOLD;
-    if (status.includes('ANSWER')) return OrderStatus.NO_ANSWER;
+    
+    if (['PENDING', 'NEW', 'ENTRY'].some(x => status.includes(x))) return OrderStatus.PENDING;
+    if (['CONFIRM', 'CONFIRMED', 'SUCCESS', 'VERIFIED'].some(x => status.includes(x))) return OrderStatus.CONFIRMED;
+    if (['SHIP', 'SHIPPED', 'DISPATCHED', 'SENT'].some(x => status.includes(x))) return OrderStatus.SHIPPED;
+    if (['DELIVERED', 'COMPLETED', 'RECEIVED'].some(x => status.includes(x))) return OrderStatus.DELIVERED;
+    if (['RETURN', 'RETURNED', 'REVERSAL'].some(x => status.includes(x))) return OrderStatus.RETURNED;
+    if (['REJECT', 'REJECTED', 'CANCEL', 'CANCELLED'].some(x => status.includes(x))) return OrderStatus.REJECTED;
+    if (['HOLD', 'WAITING', 'PAUSE'].some(x => status.includes(x))) return OrderStatus.HOLD;
+    if (['ANSWER', 'NO ANSWER', 'N/A', 'NA', 'CALL'].some(x => status.includes(x))) return OrderStatus.NO_ANSWER;
+    
     return OrderStatus.PENDING;
   };
 
   const parseSafeDate = (dateStr: string): string => {
     if (!dateStr) return new Date().toISOString();
+    // Handle "YYYY-MM-DD HH:mm:ss" by ensuring standard ISO format
     const normalized = dateStr.trim().replace(' ', 'T');
     const d = new Date(normalized);
     if (isNaN(d.getTime())) return new Date().toISOString();
     return d.toISOString();
   };
 
-  // Robust CSV Line Parser that handles empty fields correctly
   const parseCsvLine = (text: string) => {
     const result = [];
     let cur = '';
@@ -129,21 +132,21 @@ export const DevAdmin: React.FC = () => {
         const findIdx = (names: string[]) => headers.findIndex(h => names.some(n => h.toLowerCase() === n.toLowerCase()));
 
         const idx = {
-          id: findIdx(['Lead Num', 'id']),
-          tracking: findIdx(['Waybill ID', 'tracking']),
-          name: findIdx(['Customer Name', 'name']),
-          phone: findIdx(['Phone Number', 'phone']),
-          phone2: findIdx(['Contact 2']),
-          address: findIdx(['Address']),
-          city: findIdx(['City']),
-          product: findIdx(['Product']),
-          qty: findIdx(['Quantity']),
-          price: findIdx(['Price']),
-          total: findIdx(['Total Value', 'total']),
-          status: findIdx(['Status']),
-          date: findIdx(['Order Date', 'created']),
-          shipped: findIdx(['Shipped At']),
-          stockId: findIdx(['Stock Item ID'])
+          id: findIdx(['Lead Num', 'id', 'reference']),
+          tracking: findIdx(['Waybill ID', 'tracking', 'waybill']),
+          name: findIdx(['Customer Name', 'name', 'consignee']),
+          phone: findIdx(['Phone Number', 'phone', 'contact']),
+          phone2: findIdx(['Contact 2', 'alt_phone']),
+          address: findIdx(['Address', 'street']),
+          city: findIdx(['City', 'town']),
+          product: findIdx(['Product', 'item']),
+          qty: findIdx(['Quantity', 'qty']),
+          price: findIdx(['Price', 'rate']),
+          total: findIdx(['Total Value', 'total', 'amount']),
+          status: findIdx(['Status', 'state']),
+          date: findIdx(['Order Date', 'created', 'date']),
+          shipped: findIdx(['Shipped At', 'dispatch_date']),
+          stockId: findIdx(['Stock Item ID', 'sku'])
         };
 
         const orders: Order[] = [];
@@ -153,12 +156,16 @@ export const DevAdmin: React.FC = () => {
           const line = lines[i].trim();
           if (!line) continue;
           
-          // Use robust line parser
           const parts = parseCsvLine(line);
           const cleanVal = (val: string) => (val || '').replace(/^"|"$/g, '').trim();
 
+          // Standardize phone number format
           const phone = cleanVal(parts[idx.phone]).replace('p:', '').replace(/\s/g, '');
           
+          // Determine specific Milky Way Order Status
+          const rawStatus = cleanVal(parts[idx.status]);
+          const targetStatus = mapLegacyStatus(rawStatus);
+
           const legacyOrder: Order = {
             id: cleanVal(parts[idx.id]) || `mig-${Date.now()}-${i}`,
             tenantId: migrationTenantId,
@@ -169,23 +176,23 @@ export const DevAdmin: React.FC = () => {
             customerCity: cleanVal(parts[idx.city]),
             items: [{
               productId: cleanVal(parts[idx.stockId]) || 'legacy-sku',
-              name: cleanVal(parts[idx.product]),
+              name: cleanVal(parts[idx.product]) || 'Legacy Item',
               price: parseFloat(cleanVal(parts[idx.price])) || 0,
               quantity: parseInt(cleanVal(parts[idx.qty])) || 1
             }],
             totalAmount: parseFloat(cleanVal(parts[idx.total])) || 0,
-            status: mapLegacyStatus(cleanVal(parts[idx.status])),
+            status: targetStatus,
             trackingNumber: cleanVal(parts[idx.tracking]),
             createdAt: parseSafeDate(cleanVal(parts[idx.date])),
             shippedAt: parts[idx.shipped] && cleanVal(parts[idx.shipped]) ? parseSafeDate(cleanVal(parts[idx.shipped])) : undefined,
             isPrinted: true,
-            logs: [{ id: `l-${Date.now()}`, message: 'Legacy Data Migration Handshake', timestamp: new Date().toISOString(), user: 'DEV_ADMIN' }]
+            logs: [{ id: `l-${Date.now()}`, message: `Legacy Sync Handshake: Status [${rawStatus}] mapped to [${targetStatus}]`, timestamp: new Date().toISOString(), user: 'DEV_ADMIN' }]
           };
           orders.push(legacyOrder);
         }
 
         setMigrationProgress('SYNCING');
-        setMigrationLog(`Injecting ${orders.length} orders to cluster...`);
+        setMigrationLog(`Pushing ${orders.length} orders to registry...`);
         
         const chunkSize = 100;
         for (let i = 0; i < orders.length; i += chunkSize) {
@@ -212,32 +219,16 @@ export const DevAdmin: React.FC = () => {
   const handlePurgeCluster = async () => {
     if (!migrationTenantId) return alert("Select target cluster node first.");
     const tenant = tenants.find(t => t.id === migrationTenantId);
-    if (!confirm(`CRITICAL WARNING: This will permanently erase ALL orders in the [${tenant?.settings.shopName || migrationTenantId}] cluster. There is no undo. Proceed?`)) return;
+    if (!confirm(`CRITICAL WARNING: This will permanently erase ALL records (10,000+) in the [${tenant?.settings.shopName || migrationTenantId}] cluster registry. Proceed?`)) return;
     
     setMigrationProgress('PURGING');
-    setMigrationLog('Querying cluster registry for purging...');
+    setMigrationLog('Initiating high-speed server-side purge protocol...');
     
     try {
-      let page = 1;
-      let totalPurged = 0;
-      let hasMore = true;
-
-      while (hasMore) {
-        setMigrationLog(`Fetching page ${page} for purging...`);
-        const response = await db.getOrders({ tenantId: migrationTenantId, page, limit: 100 });
-        if (response.data.length === 0) {
-          hasMore = false;
-        } else {
-          setMigrationLog(`Erasing ${response.data.length} records...`);
-          await Promise.all(response.data.map(o => db.deleteOrder(o.id, migrationTenantId)));
-          totalPurged += response.data.length;
-          if (response.data.length < 100) hasMore = false;
-          else page++; // Note: Since we are deleting, page 1 will always have the next 100, but incrementing is safer in case of indexing lag.
-        }
-      }
-
+      // Execute the atomic purge method for instant 10,000+ record cleanup
+      const count = await db.purgeOrders(migrationTenantId);
       setMigrationProgress('SUCCESS');
-      setMigrationLog(`Cluster Sanitize Complete: ${totalPurged} orders purged.`);
+      setMigrationLog(`Cluster Sanitize Complete: ${count} records wiped from registry.`);
     } catch (err: any) {
       setMigrationProgress('ERROR');
       setMigrationLog(`Purge Failure: ${err.message}`);
@@ -375,7 +366,7 @@ export const DevAdmin: React.FC = () => {
                       </div>
                   </div>
 
-                  {/* Cleanup Tools Section */}
+                  {/* High Speed Purge Utility */}
                   <div className="bg-rose-50 border-2 border-rose-100 p-10 rounded-[3rem] space-y-6">
                       <div className="flex items-center gap-4">
                           <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg">
@@ -383,18 +374,18 @@ export const DevAdmin: React.FC = () => {
                           </div>
                           <div>
                               <h3 className="text-xl font-black uppercase text-rose-900 leading-none">Cluster Sanitize</h3>
-                              <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mt-1">Bulk Cleanup Utilities</p>
+                              <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mt-1">Atomic Cleanup Utility</p>
                           </div>
                       </div>
                       <p className="text-[11px] font-bold text-rose-600/70 uppercase leading-relaxed px-2">
-                        Use these tools to wipe historical cluster data before a fresh migration or to decommission old registry entries.
+                        Wipe entire cluster histories instantly (10,000+ records) using the high-speed server-side protocol. This action is final.
                       </p>
                       <button 
                         onClick={handlePurgeCluster}
                         disabled={!migrationTenantId || migrationProgress === 'SYNCING' || migrationProgress === 'PURGING'}
                         className="w-full py-5 bg-rose-600 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-rose-700 transition-all flex items-center justify-center gap-3 disabled:opacity-30"
                       >
-                         <Flame size={18} /> {migrationProgress === 'PURGING' ? 'PURGING CLUSTER REGISTRY...' : 'Purge All Cluster Orders'}
+                         <Flame size={18} /> {migrationProgress === 'PURGING' ? 'ERASING REGISTRY...' : 'Purge Cluster (10k+ Records)'}
                       </button>
                   </div>
               </div>
