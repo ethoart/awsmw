@@ -100,7 +100,7 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`CRITICAL: Permanent Wipe of ${selectedIds.length} Nodes. Continue?`)) return;
+    if (!confirm(`CRITICAL: Registry Wipe. Permanent removal of ${selectedIds.length} nodes. Continue?`)) return;
     setBulkProcessing(true);
     setBulkProgressMsg('EXECUTING WIPE...');
     try {
@@ -133,14 +133,16 @@ export const OrderList: React.FC<OrderListProps> = ({
         if (order) {
             setBulkProgressMsg(`TRANSMITTING ${i+1}/${targetIds.length}: ${order.customerName}`);
             try {
+                // SEQUENTIAL DISPATCH with robust error trapping
                 await db.shipOrder(order, tenantId);
                 successCount++;
             } catch (err: any) {
                 failCount++;
                 lastError = err.message;
+                console.error(`FDE Handshake failed for ${order.id}:`, err);
             }
-            // 500ms COOLDOWN: Crucial for legacy PHP backends like FDE
-            await new Promise(r => setTimeout(r, 500));
+            // 600ms COOLDOWN: Essential for legacy Courier PHP backends to process each record
+            await new Promise(r => setTimeout(r, 600));
         }
     }
 
