@@ -309,7 +309,7 @@ app.post('/api/process-return', async (req, res) => {
             const updated = { 
                 ...order, 
                 status: 'RETURN_COMPLETED',
-                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'OMS Scan: Return Processed & Stock Restored', timestamp: new Date().toISOString(), user: 'Scanner' }]
+                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'Milky Way Scan: Return Processed & Stock Restored', timestamp: new Date().toISOString(), user: 'OMS Scan' }]
             };
             await ordersCol.updateOne({ id: order.id }, { $set: clean(updated) });
             return res.json(updated);
@@ -327,7 +327,7 @@ app.post('/api/ship-order', async (req, res) => {
         const tenantSettings = tenantDoc?.settings;
         
         if (!tenantSettings || !tenantSettings.courierApiKey) {
-            return res.status(400).json({ error: "Logistics credentials missing." });
+            return res.status(400).json({ error: "Logistics credentials missing in cluster configuration." });
         }
 
         const cleanOrderId = order.id.replace(/\D/g, '').slice(-10); 
@@ -353,7 +353,13 @@ app.post('/api/ship-order', async (req, res) => {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: formData
         });
-        const data = await response.json();
+        
+        let data;
+        try {
+            data = await response.json();
+        } catch (err) {
+            return res.status(500).json({ error: `External Logistics API error: ${response.status} ${response.statusText}` });
+        }
 
         if (Number(data.status) === 200) {
             const existing = await db.collection('orders').findOne({ id: order.id });
@@ -365,14 +371,14 @@ app.post('/api/ship-order', async (req, res) => {
                 status: 'SHIPPED', 
                 shippedAt: new Date().toISOString(), 
                 trackingNumber: data.waybill_no || order.trackingNumber,
-                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'OMS Scan: Handshake Successful', timestamp: new Date().toISOString(), user: 'Scanner' }]
+                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'Milky Way Logistics Handshake: Successful', timestamp: new Date().toISOString(), user: 'OMS Connector' }]
             };
             await db.collection('orders').updateOne({ id: order.id }, { $set: clean(updatedOrder) });
             res.json(updatedOrder);
         } else {
-            res.status(400).json({ error: data.message || 'Handshake failed' });
+            res.status(400).json({ error: `Logistics Dispatch Denied: ${data.message || 'Handshake failed'}` });
         }
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: `System Handshake Failure: ${e.message}` }); }
 });
 
 app.get('/api/tenants', async (req, res) => {

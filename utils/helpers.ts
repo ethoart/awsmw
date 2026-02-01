@@ -11,7 +11,7 @@ export const formatCurrency = (amount: number) => {
   }).format(amount || 0);
 };
 
-export const formatFullNumber = (num: number, decimals: number = 0) => {
+export const formatFullNumber = (num: number, decimals: number = 2) => {
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,

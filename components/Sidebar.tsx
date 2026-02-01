@@ -35,8 +35,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, shopName, logoUrl, activ
   const hasAccess = (pageId: string) => {
     if (user.role === UserRole.DEV_ADMIN) return true;
     if (user.role === UserRole.SUPER_ADMIN) return true;
-    // Admin accounts get access to basic terminals and the OMS scan
-    if (user.role === UserRole.ADMIN && (pageId === 'selling' || pageId === 'returns')) return true;
+    // Admins get access to pipeline, scan terminals and operational tools
+    if (user.role === UserRole.ADMIN) {
+        const adminPages = ['dashboard', 'leads', 'selling', 'shipping', 'today_shipped', 'return_mgmt', 'residual_mgmt', 'inventory', 'returns'];
+        if (adminPages.includes(pageId)) return true;
+    }
     return user.permissions?.includes(pageId);
   };
 
@@ -102,9 +105,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, shopName, logoUrl, activ
           )}
           <div className="flex flex-col">
             <h1 className="text-[15px] font-black text-slate-900 tracking-tight uppercase leading-none truncate max-w-[140px]">
-              {shopName || 'Milky Way'}
+              Milky Way OMS
             </h1>
-            <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">OMS CLUSTER</span>
+            <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">Enterprise Hub</span>
           </div>
         </div>
 
