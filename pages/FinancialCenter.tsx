@@ -8,18 +8,14 @@ import {
   Calculator, 
   ArrowUpRight, 
   TrendingUp, 
-  Info, 
-  DollarSign, 
-  Package, 
-  Percent, 
-  Calendar, 
-  Users, 
   PieChart, 
   Download, 
   Settings2,
   Receipt,
-  Megaphone,
-  Printer
+  Printer,
+  Calendar,
+  Users,
+  Package
 } from 'lucide-react';
 
 interface FinancialCenterProps {
@@ -48,10 +44,19 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const [o, p] = await Promise.all([db.getOrders(tenantId), db.getProducts(tenantId)]);
-      setOrders(o);
-      setProducts(p);
-      setLoading(false);
+      try {
+        // Fetch up to 10k orders for financial summary calculations
+        const [oRes, p] = await Promise.all([
+          db.getOrders({ tenantId, limit: 10000 }), 
+          db.getProducts(tenantId)
+        ]);
+        setOrders(oRes.data || []);
+        setProducts(p || []);
+      } catch (e) {
+        console.error("Financial sync failure", e);
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, [tenantId]);
@@ -60,6 +65,12 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
     const start = new Date(startDate);
     const end = new Date(endDate);
     end.setHours(23, 59, 59);
+
+    if (!Array.isArray(orders)) return {
+      grossRevenue: 0, totalCogs: 0, grossProfit: 0, deliveredCount: 0, returnedCount: 0,
+      totalDeliveryDeduction: 0, totalReturnDeduction: 0, netProfit: 0, investorShare: 0,
+      workerSharePool: 0, perWorkerProfit: 0, orderCount: 0
+    };
 
     const filtered = orders.filter(o => {
       const d = new Date(o.createdAt);
@@ -77,8 +88,6 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
     const totalCogs = deliveredOrders.reduce((sum, order) => {
       return sum + order.items.reduce((itemSum, item) => {
         const prod = products.find(p => p.id === item.productId);
-        // Fix: Property 'buyingPrice' does not exist on type 'Product'. 
-        // Calculating average cost from batches as a fallback for COGS estimation.
         const avgBuyingPrice = prod?.batches && prod.batches.length > 0 
           ? prod.batches.reduce((acc, b) => acc + b.buyingPrice, 0) / prod.batches.length 
           : 0;

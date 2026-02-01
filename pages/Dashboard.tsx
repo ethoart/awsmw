@@ -7,7 +7,7 @@ import {
   RefreshCcw, DollarSign, Truck, RotateCcw, 
   Archive, Users, Calendar, ShoppingBag, Star, Activity, Box,
   Award, ListChecks, ArrowUpRight, LayoutDashboard,
-  ShieldCheck, Target, Rocket, ClipboardList
+  ShieldCheck, Target, Rocket, ClipboardList, RotateCw, History as HistoryIcon
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, 
@@ -47,9 +47,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      // For dashboard stats, we fetch a larger sample to provide a good overview
       const [orderRes, fetchedProducts, fetchedTeam] = await Promise.all([
-          db.getOrders({ tenantId, limit: 1000 }), 
+          db.getOrders({ tenantId, limit: 5000 }), 
           db.getProducts(tenantId),
           db.getTeamMembers(tenantId)
       ]);
@@ -76,6 +75,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     let todayReturns = 0;
 
     const filteredShippedProducts: { [name: string]: number } = {};
+    const filteredReturnedProducts: { [name: string]: { count: number, sku: string } } = {};
 
     const dailyMap: { [key: string]: any } = {};
     const productStats: { [key: string]: any } = {};
@@ -127,6 +127,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           });
         }
 
+        // Logic for "Return Scan Items" Product-wise aggregation
+        if (isInRange && o.status.includes('RETURN')) {
+          o.items.forEach(item => {
+            if (!filteredReturnedProducts[item.name]) {
+              filteredReturnedProducts[item.name] = { count: 0, sku: '' };
+              const pRef = products.find(p => p.id === item.productId);
+              filteredReturnedProducts[item.name].sku = pRef?.sku || 'N/A';
+            }
+            filteredReturnedProducts[item.name].count += item.quantity;
+          });
+        }
+
         if (o.logs) {
             o.logs.forEach(log => {
                 const logDate = log.timestamp.split('T')[0];
@@ -173,6 +185,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         stats: { deliveredCount, returnedCount, confirmedCount, shippedCount, totalRevenue, restockCount },
         today: { todayOrders, todayRevenue, todayShipped, todayReturns },
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
+        returnedManifest: Object.entries(filteredReturnedProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
         products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.shipped > 0),
         teamLeaderboard: Object.values(teamStats).sort((a,b) => b.confirms - a.confirms)
@@ -267,7 +280,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             </div>
         </div>
 
-        <div className="lg:col-span-8 grid grid-cols-2 md:grid-cols-3 gap-4">
+        {/* NEW SECTION: Returned Stock Intelligence */}
+        <div className="lg:col-span-4 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col border-t-rose-600 border-t-4">
+            <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-6">
+                <RotateCcw size={18} className="text-rose-600"/> Returned Stock Intelligence
+            </h3>
+            <div className="flex-1 space-y-3 overflow-y-auto no-scrollbar max-h-[350px]">
+                {dashboardData.returnedManifest.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center py-10 opacity-30 text-center">
+                    <RotateCw size={40} className="mb-3" />
+                    <p className="text-[10px] font-black uppercase tracking-widest">No Returns in Registry</p>
+                  </div>
+                ) : (
+                  dashboardData.returnedManifest.map(([name, data]: any, i) => (
+                    <div key={i} className="flex items-center justify-between p-4 bg-rose-50/30 rounded-2xl border border-rose-100 group hover:bg-rose-50 transition-all">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-white border border-rose-200 rounded-lg flex items-center justify-center text-[10px] font-black text-rose-600 group-hover:border-rose-400">{i+1}</div>
+                        <div className="flex flex-col overflow-hidden">
+                            <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight truncate max-w-[150px]">{name}</span>
+                            <span className="text-[8px] font-mono text-rose-500 font-bold uppercase">{data.sku}</span>
+                        </div>
+                      </div>
+                      <span className="bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-rose-200">×{data.count}</span>
+                    </div>
+                  ))
+                )}
+            </div>
+            <div className="mt-4 pt-4 border-t border-slate-50">
+               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">OMS Scan Terminal Data</p>
+            </div>
+        </div>
+
+        <div className="lg:col-span-4 grid grid-cols-2 gap-4">
             {[
               { label: 'Confirmed', val: dashboardData.stats.confirmedCount, icon: <Star/>, col: 'bg-emerald-50 text-emerald-600' },
               { label: 'Shipped', val: dashboardData.stats.shippedCount, icon: <Truck/>, col: 'bg-blue-50 text-blue-600' },
