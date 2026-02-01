@@ -46,7 +46,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
     db.getProducts(tenantId).then(setProducts);
     db.getTenant(tenantId).then(setTenant);
     db.getGlobalCities().then(c => {
-        // Deduplicate cities
         const cityList = Array.from(new Set(c.length > 0 ? c : SRI_LANKA_CITIES_FALLBACK));
         setCities(cityList);
         setManualForm(prev => ({ ...prev, city: cityList.includes('Colombo') ? 'Colombo' : cityList[0] }));
@@ -116,8 +115,14 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
     const reader = new FileReader();
     reader.onload = (event) => {
         const text = event.target?.result as string;
+        // The helper parseCSV already handles basic cleaning
         const parsed = parseCSV(text);
-        setPendingLeads(parsed);
+        // STRICT FILTER: Remove any records where Name, Phone, or Address are still empty
+        const cleaned = parsed.filter(l => l.name && l.phone && l.address && l.name.length > 1);
+        setPendingLeads(cleaned);
+        if (cleaned.length < parsed.length) {
+            alert(`Filtered ${parsed.length - cleaned.length} incomplete records.`);
+        }
     };
     reader.readAsText(file);
   };
@@ -182,7 +187,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         <div className="lg:col-span-8 space-y-8">
-            
             <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
               <div className="flex items-center justify-between pb-6 border-b border-slate-50">
                 <div className="flex items-center gap-3">
@@ -257,7 +261,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
                     placeholder="Full street address..."
                   />
                 </div>
-                
                 <div className="space-y-2 relative">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">SKU Assignment</label>
                   <select 
@@ -270,7 +273,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
                   </select>
                   <ChevronDown className="absolute right-6 bottom-4 text-slate-400 pointer-events-none" size={18} />
                 </div>
-
                 <div className="space-y-2 relative">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Parcel Weight (KG)</label>
                     <div className="relative">
