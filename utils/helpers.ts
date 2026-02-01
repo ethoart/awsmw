@@ -5,18 +5,7 @@ export const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-LK', {
     style: 'currency',
     currency: 'LKR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: true,
   }).format(amount || 0);
-};
-
-export const formatFullNumber = (num: number, decimals: number = 2) => {
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-    useGrouping: true,
-  }).format(num || 0);
 };
 
 export const getCustomerStatusColor = (status: CustomerStatus) => {
@@ -32,13 +21,13 @@ export const parseCSV = (text: string) => {
   const lines = text.split('\n');
   const result = [];
   
-  if (lines.length < 2) return [];
-
+  // Find header indices to be format-agnostic
   const header = lines[0].toLowerCase().split(',');
   const nameIdx = header.indexOf('full_name');
   const addrIdx = header.indexOf('street_address');
   const phoneIdx = header.indexOf('phone');
 
+  // If headers don't match, fallback to 0, 1, 2
   const finalNameIdx = nameIdx !== -1 ? nameIdx : 0;
   const finalAddrIdx = addrIdx !== -1 ? addrIdx : 1;
   const finalPhoneIdx = phoneIdx !== -1 ? phoneIdx : 2;
@@ -47,17 +36,15 @@ export const parseCSV = (text: string) => {
     const line = lines[i].trim();
     if (!line) continue;
     
+    // Handle quoted values (common in addresses with commas)
     const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
-    if (parts) {
-      const cleanVal = (val: string) => (val || '').replace(/^"|"$/g, '').trim();
-      
-      const name = cleanVal(parts[finalNameIdx]);
-      const address = cleanVal(parts[finalAddrIdx]);
-      const phone = cleanVal(parts[finalPhoneIdx]).replace('p:', '').replace(/\s/g, '');
-
-      if (name && address && phone && name.length > 2 && phone.length > 8) {
-          result.push({ name, address, phone });
-      }
+    if (parts && parts.length >= 2) {
+      const clean = (val: string) => val.replace(/^"|"$/g, '').trim();
+      result.push({
+        name: clean(parts[finalNameIdx] || ''),
+        address: clean(parts[finalAddrIdx] || ''),
+        phone: clean(parts[finalPhoneIdx] || '').replace('p:', '')
+      });
     }
   }
   return result;

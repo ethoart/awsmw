@@ -39,11 +39,13 @@ export const OrderList: React.FC<OrderListProps> = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Reset pagination when filter or search changes
   useEffect(() => {
     setCurrentPage(1);
     setSelectedIds([]);
   }, [status, productId, startDate, endDate, debouncedSearch]);
 
+  // Debounce search input
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(search);
@@ -68,6 +70,7 @@ export const OrderList: React.FC<OrderListProps> = ({
       setOrders(response.data);
       setTotalCount(response.total);
       
+      // Fetch customer history for visible items
       if (response.data.length > 0) {
         const uniquePhones = [...new Set(response.data.map(o => o.customerPhone))];
         const historyResults = await Promise.all(uniquePhones.map(async (phone) => {
@@ -98,16 +101,13 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`CRITICAL: Permanent wipe of ${selectedIds.length} registry nodes. Continue?`)) return;
+    if (!confirm(`CRITICAL: Destroy ${selectedIds.length} orders forever?`)) return;
     setIsLoading(true);
     try {
-      // Use the optimized bulk ID string for a single network request
-      await db.deleteOrder(selectedIds.join(','), tenantId);
+      await Promise.all(selectedIds.map(id => db.deleteOrder(id, tenantId)));
       setSelectedIds([]);
       loadData();
       if (onRefresh) onRefresh();
-    } catch (e: any) {
-      alert(`Wipe Failed: ${e.message}`);
     } finally { setIsLoading(false); }
   };
 
@@ -169,7 +169,7 @@ export const OrderList: React.FC<OrderListProps> = ({
               </button>
             )}
             <button onClick={handleBulkDelete} className="bg-rose-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2">
-              <Trash2 size={14} /> Wipe Registry
+              <Trash2 size={14} /> Delete
             </button>
             <button onClick={() => setSelectedIds([])} className="bg-white/10 px-6 py-2 rounded-xl text-[10px] font-black uppercase">Cancel</button>
           </div>

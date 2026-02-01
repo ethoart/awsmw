@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/mockBackend';
-import { Tenant, User, UserRole, Order, OrderStatus, Product } from '../types';
+import { Tenant, User, UserRole, Order, OrderStatus } from '../types';
 import { 
   Database, RefreshCcw, Globe, Plus, Trash2, Cloud, 
   AlertTriangle, Settings, Layout, Globe2, ShieldAlert, Key, Zap,
   FileUp, DatabaseBackup, CheckCircle2, AlertCircle, HardDriveDownload,
   Users, ChevronDown, Rocket, Lock, Store, ImageIcon, ShieldCheck, Mail,
-  Eraser, Flame, Package, Download, Upload, Box
+  Eraser, Flame
 } from 'lucide-react';
 
 export const DevAdmin: React.FC = () => {
@@ -24,12 +24,10 @@ export const DevAdmin: React.FC = () => {
 
   // Migration States
   const [migrationTenantId, setMigrationTenantId] = useState('');
-  const [targetStatus, setTargetStatus] = useState<OrderStatus>(OrderStatus.PENDING);
   const [migrationFile, setMigrationFile] = useState<File | null>(null);
   const [migrationProgress, setMigrationProgress] = useState<'IDLE' | 'PARSING' | 'SYNCING' | 'SUCCESS' | 'ERROR' | 'PURGING'>('IDLE');
   const [migrationLog, setMigrationLog] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const inventoryFileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -75,8 +73,25 @@ export const DevAdmin: React.FC = () => {
     } catch (e: any) { alert(e.message); } finally { setLoading(false); }
   };
 
+  // Robust Status Intelligence for various CSV exports
+  const mapLegacyStatus = (s: string): OrderStatus => {
+    const status = (s || '').trim().toUpperCase();
+    
+    if (['PENDING', 'NEW', 'ENTRY'].some(x => status.includes(x))) return OrderStatus.PENDING;
+    if (['CONFIRM', 'CONFIRMED', 'SUCCESS', 'VERIFIED'].some(x => status.includes(x))) return OrderStatus.CONFIRMED;
+    if (['SHIP', 'SHIPPED', 'DISPATCHED', 'SENT'].some(x => status.includes(x))) return OrderStatus.SHIPPED;
+    if (['DELIVERED', 'COMPLETED', 'RECEIVED'].some(x => status.includes(x))) return OrderStatus.DELIVERED;
+    if (['RETURN', 'RETURNED', 'REVERSAL'].some(x => status.includes(x))) return OrderStatus.RETURNED;
+    if (['REJECT', 'REJECTED', 'CANCEL', 'CANCELLED'].some(x => status.includes(x))) return OrderStatus.REJECTED;
+    if (['HOLD', 'WAITING', 'PAUSE'].some(x => status.includes(x))) return OrderStatus.HOLD;
+    if (['ANSWER', 'NO ANSWER', 'N/A', 'NA', 'CALL'].some(x => status.includes(x))) return OrderStatus.NO_ANSWER;
+    
+    return OrderStatus.PENDING;
+  };
+
   const parseSafeDate = (dateStr: string): string => {
     if (!dateStr) return new Date().toISOString();
+    // Handle "YYYY-MM-DD HH:mm:ss" by ensuring standard ISO format
     const normalized = dateStr.trim().replace(' ', 'T');
     const d = new Date(normalized);
     if (isNaN(d.getTime())) return new Date().toISOString();
@@ -128,6 +143,7 @@ export const DevAdmin: React.FC = () => {
           qty: findIdx(['Quantity', 'qty']),
           price: findIdx(['Price', 'rate']),
           total: findIdx(['Total Value', 'total', 'amount']),
+          status: findIdx(['Status', 'state']),
           date: findIdx(['Order Date', 'created', 'date']),
           shipped: findIdx(['Shipped At', 'dispatch_date']),
           stockId: findIdx(['Stock Item ID', 'sku'])
@@ -143,25 +159,20 @@ export const DevAdmin: React.FC = () => {
           const parts = parseCsvLine(line);
           const cleanVal = (val: string) => (val || '').replace(/^"|"$/g, '').trim();
 
-          const name = cleanVal(parts[idx.name]);
-          const rawPhone = cleanVal(parts[idx.phone]);
-          const address = cleanVal(parts[idx.address]);
-
-          // STRICT FILTER: Only complete records (Name, Address, Mobile Number)
-          if (!name || !rawPhone || !address) {
-              console.log(`Skipping incomplete record at line ${i}`);
-              continue;
-          }
-
-          const phone = rawPhone.replace('p:', '').replace(/\s/g, '');
+          // Standardize phone number format
+          const phone = cleanVal(parts[idx.phone]).replace('p:', '').replace(/\s/g, '');
           
+          // Determine specific Milky Way Order Status
+          const rawStatus = cleanVal(parts[idx.status]);
+          const targetStatus = mapLegacyStatus(rawStatus);
+
           const legacyOrder: Order = {
             id: cleanVal(parts[idx.id]) || `mig-${Date.now()}-${i}`,
             tenantId: migrationTenantId,
-            customerName: name,
+            customerName: cleanVal(parts[idx.name]),
             customerPhone: phone,
             customerPhone2: cleanVal(parts[idx.phone2]),
-            customerAddress: address,
+            customerAddress: cleanVal(parts[idx.address]),
             customerCity: cleanVal(parts[idx.city]),
             items: [{
               productId: cleanVal(parts[idx.stockId]) || 'legacy-sku',
@@ -175,13 +186,9 @@ export const DevAdmin: React.FC = () => {
             createdAt: parseSafeDate(cleanVal(parts[idx.date])),
             shippedAt: parts[idx.shipped] && cleanVal(parts[idx.shipped]) ? parseSafeDate(cleanVal(parts[idx.shipped])) : undefined,
             isPrinted: true,
-            logs: [{ id: `l-${Date.now()}`, message: `Legacy Sync Handshake: Status locked to [${targetStatus}]`, timestamp: new Date().toISOString(), user: 'DEV_ADMIN' }]
+            logs: [{ id: `l-${Date.now()}`, message: `Legacy Sync Handshake: Status [${rawStatus}] mapped to [${targetStatus}]`, timestamp: new Date().toISOString(), user: 'DEV_ADMIN' }]
           };
           orders.push(legacyOrder);
-        }
-
-        if (orders.length === 0) {
-            throw new Error("No complete records found in payload.");
         }
 
         setMigrationProgress('SYNCING');
@@ -209,51 +216,6 @@ export const DevAdmin: React.FC = () => {
     reader.readAsText(migrationFile);
   };
 
-  const handleInventoryBackup = async () => {
-      if (!migrationTenantId) return alert("Select target cluster node first.");
-      try {
-          const products = await db.getProducts(migrationTenantId);
-          const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(products, null, 2));
-          const downloadAnchorNode = document.createElement('a');
-          downloadAnchorNode.setAttribute("href", dataStr);
-          downloadAnchorNode.setAttribute("download", `inventory_backup_${migrationTenantId}_${new Date().toISOString()}.json`);
-          document.body.appendChild(downloadAnchorNode);
-          downloadAnchorNode.click();
-          downloadAnchorNode.remove();
-          alert("Inventory Backup generated and downloaded.");
-      } catch (err: any) {
-          alert("Backup Failure: " + err.message);
-      }
-  };
-
-  const handleInventoryRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !migrationTenantId) return;
-      
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-          try {
-              const products = JSON.parse(event.target?.result as string);
-              if (!Array.isArray(products)) throw new Error("Invalid inventory payload format.");
-              
-              setMigrationProgress('SYNCING');
-              setMigrationLog(`Restoring ${products.length} product records...`);
-              
-              for (const p of products) {
-                  await db.updateProduct({ ...p, tenantId: migrationTenantId });
-              }
-              
-              setMigrationProgress('SUCCESS');
-              setMigrationLog(`Inventory Restore Complete: ${products.length} nodes synced.`);
-              alert("Inventory cluster restoration complete.");
-          } catch (err: any) {
-              setMigrationProgress('ERROR');
-              setMigrationLog(`Restore Failure: ${err.message}`);
-          }
-      };
-      reader.readAsText(file);
-  };
-
   const handlePurgeCluster = async () => {
     if (!migrationTenantId) return alert("Select target cluster node first.");
     const tenant = tenants.find(t => t.id === migrationTenantId);
@@ -263,9 +225,10 @@ export const DevAdmin: React.FC = () => {
     setMigrationLog('Initiating high-speed server-side purge protocol...');
     
     try {
+      // Execute the atomic purge method for instant 10,000+ record cleanup
       const count = await db.purgeOrders(migrationTenantId);
       setMigrationProgress('SUCCESS');
-      setMigrationLog(`Cluster Sanitize Complete: ${count} orders wiped from registry.`);
+      setMigrationLog(`Cluster Sanitize Complete: ${count} records wiped from registry.`);
     } catch (err: any) {
       setMigrationProgress('ERROR');
       setMigrationLog(`Purge Failure: ${err.message}`);
@@ -307,7 +270,7 @@ export const DevAdmin: React.FC = () => {
       <div className="flex gap-2 p-1.5 bg-white rounded-2xl w-fit border border-slate-100 mb-6 shadow-sm">
           <button onClick={() => setView('CLUSTERS')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'CLUSTERS' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Active Clusters</button>
           <button onClick={() => setView('DOMAINS')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'DOMAINS' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>DNS & Tunnels</button>
-          <button onClick={() => setView('MIGRATION')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'MIGRATION' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Data Management Hub</button>
+          <button onClick={() => setView('MIGRATION')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'MIGRATION' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Migration Engine</button>
       </div>
 
       {view === 'CLUSTERS' && (
@@ -344,47 +307,31 @@ export const DevAdmin: React.FC = () => {
       {view === 'MIGRATION' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               <div className="lg:col-span-7 space-y-8">
-                  {/* Migration Card */}
-                  <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-10">
+                  <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-sm space-y-10">
                       <div className="flex items-center gap-4 border-b border-slate-50 pb-8">
                           <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-[1.5rem] flex items-center justify-center shadow-inner">
                               <DatabaseBackup size={28} />
                           </div>
                           <div>
-                              <h3 className="text-2xl font-black uppercase text-slate-900 leading-none tracking-tighter">Bulk History Data Sync</h3>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Legacy CSV Synchronization Engine</p>
+                              <h3 className="text-2xl font-black uppercase text-slate-900 leading-none tracking-tighter">Migration Protocol</h3>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Legacy CSV Synchronization</p>
                           </div>
                       </div>
 
                       <div className="space-y-8">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Cluster Node</label>
-                                <div className="relative">
-                                    <select 
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 text-sm font-black text-slate-900 outline-none appearance-none focus:ring-4 focus:ring-blue-100 transition-all"
-                                        value={migrationTenantId}
-                                        onChange={e => setMigrationTenantId(e.target.value)}
-                                    >
-                                        <option value="">Select Destination...</option>
-                                        {tenants.map(t => <option key={t.id} value={t.id}>{t.settings.shopName} ({t.id})</option>)}
-                                    </select>
-                                    <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
-                                </div>
-                            </div>
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Inject as Status</label>
-                                <div className="relative">
-                                    <select 
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 text-sm font-black text-slate-900 outline-none appearance-none focus:ring-4 focus:ring-blue-100 transition-all"
-                                        value={targetStatus}
-                                        onChange={e => setTargetStatus(e.target.value as OrderStatus)}
-                                    >
-                                        {Object.values(OrderStatus).map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-                                    </select>
-                                    <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
-                                </div>
-                            </div>
+                          <div className="space-y-3">
+                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Cluster Node</label>
+                              <div className="relative">
+                                  <select 
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 text-sm font-black text-slate-900 outline-none appearance-none focus:ring-4 focus:ring-blue-100 transition-all"
+                                      value={migrationTenantId}
+                                      onChange={e => setMigrationTenantId(e.target.value)}
+                                  >
+                                      <option value="">Select Destination...</option>
+                                      {tenants.map(t => <option key={t.id} value={t.id}>{t.settings.shopName} ({t.id})</option>)}
+                                  </select>
+                                  <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+                              </div>
                           </div>
 
                           <div className="space-y-3">
@@ -402,12 +349,11 @@ export const DevAdmin: React.FC = () => {
                                   ) : (
                                       <>
                                           <FileUp size={48} className="text-slate-200 group-hover:text-blue-200 group-hover:scale-110 transition-all mb-4" />
-                                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Status-Specific CSV</p>
+                                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select CSV Payload</p>
                                       </>
                                   )}
                                   <input ref={fileInputRef} type="file" accept=".csv" onChange={e => setMigrationFile(e.target.files?.[0] || null)} className="hidden" />
                               </div>
-                              <p className="text-[9px] font-bold text-slate-400 uppercase px-2 italic">* Note: System will automatically ignore empty/incomplete records lacking Name, Address, or Phone.</p>
                           </div>
 
                           <button 
@@ -416,35 +362,6 @@ export const DevAdmin: React.FC = () => {
                             className="w-full py-6 bg-blue-600 text-white rounded-[2rem] font-black text-[11px] uppercase tracking-[0.3em] shadow-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
                           >
                             <Zap size={18}/> {migrationProgress === 'SYNCING' ? 'SYNCHRONIZING CLUSTER...' : 'Execute Migration Protocol'}
-                          </button>
-                      </div>
-                  </div>
-
-                  {/* Inventory Hub Card */}
-                  <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
-                      <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center"><Box size={24}/></div>
-                          <div>
-                              <h3 className="text-xl font-black uppercase text-slate-900 leading-none">Inventory Control Hub</h3>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Backup & Restoration Utilities</p>
-                          </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <button 
-                            onClick={handleInventoryBackup}
-                            disabled={!migrationTenantId}
-                            className="flex items-center justify-center gap-3 py-6 bg-slate-100 text-slate-900 rounded-[2rem] font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all disabled:opacity-30"
-                          >
-                              <Download size={18} /> Export Inventory Backup
-                          </button>
-                          <button 
-                            onClick={() => inventoryFileRef.current?.click()}
-                            disabled={!migrationTenantId}
-                            className="flex items-center justify-center gap-3 py-6 bg-indigo-600 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-lg transition-all disabled:opacity-30"
-                          >
-                              <Upload size={18} /> Restore from Backup
-                              <input ref={inventoryFileRef} type="file" accept=".json" onChange={handleInventoryRestore} className="hidden" />
                           </button>
                       </div>
                   </div>
