@@ -7,7 +7,8 @@ import {
   RefreshCcw, DollarSign, Truck, RotateCcw, 
   Archive, Users, Calendar, ShoppingBag, Star, Activity, Box,
   Award, ListChecks, ArrowUpRight, LayoutDashboard,
-  ShieldCheck, Target, Rocket, ClipboardList, RotateCw, History as HistoryIcon, PackageCheck
+  ShieldCheck, Target, Rocket, ClipboardList, RotateCw, History as HistoryIcon, PackageCheck,
+  XCircle, PhoneOff, UserPlus
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, 
@@ -121,7 +122,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         if (o.status === OrderStatus.DELIVERED && shipDate === today) todayRevenue += o.totalAmount;
         if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturns++;
 
-        // SCANNED RETURN LOGIC: Filter specifically for RETURN_COMPLETED
         if (isInRange && o.status === OrderStatus.RETURN_COMPLETED) {
           o.items.forEach(item => {
             if (!scannedReturnProducts[item.name]) {
@@ -157,7 +157,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                 confirmedCount++;
                 o.items.forEach(item => { if(productStats[item.productId]) productStats[item.productId].salesCount += item.quantity; });
             }
-            if (o.status.includes('RETURN')) returnedCount++;
+            if (o.status.includes('RETURN')) {
+              returnedCount++;
+              o.items.forEach(item => { if(productStats[item.productId]) productStats[item.productId].returned += item.quantity; });
+            }
             if (o.status === OrderStatus.RETURN_COMPLETED) restockCount++;
         }
 
@@ -187,7 +190,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
         scannedReturnManifest: Object.entries(scannedReturnProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
-        products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.delivered > 0),
+        products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.delivered > 0 || p.returned > 0),
         teamLeaderboard: Object.values(teamStats).sort((a,b) => b.confirms - a.confirms)
     };
   }, [orders, products, team, startDate, endDate]);
@@ -221,14 +224,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         </div>
       </div>
 
-      {/* TOP KEY METRICS SECTION - UPDATED WITH TOTAL DISPATCH AND FULL NUMBERS */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
-            { label: 'Delivered', val: formatFullNumber(dashboardData.stats.deliveredCount), icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', sub: 'Net Complete' },
-            { label: 'Confirmed', val: formatFullNumber(dashboardData.stats.confirmedCount), icon: <Star/>, col: 'bg-blue-50 text-blue-600', sub: 'Pipeline' },
-            { label: 'Total Dispatch', val: formatFullNumber(dashboardData.stats.shippedCount), icon: <Truck/>, col: 'bg-indigo-50 text-indigo-600', sub: 'Dispatched' },
-            { label: 'Total Returns', val: formatFullNumber(dashboardData.stats.returnedCount), icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', sub: 'Inbound' },
-            { label: 'OMS Restock', val: formatFullNumber(dashboardData.stats.restockCount), icon: <Archive/>, col: 'bg-amber-50 text-amber-600', sub: 'Scanned' },
+            { label: 'Delivered', val: formatFullNumber(dashboardData.stats.deliveredCount, 2), icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', sub: 'Net Complete' },
+            { label: 'Confirmed', val: formatFullNumber(dashboardData.stats.confirmedCount, 2), icon: <Star/>, col: 'bg-blue-50 text-blue-600', sub: 'Pipeline' },
+            { label: 'Total Dispatch', val: formatFullNumber(dashboardData.stats.shippedCount, 2), icon: <Truck/>, col: 'bg-indigo-50 text-indigo-600', sub: 'Dispatched' },
+            { label: 'Total Returns', val: formatFullNumber(dashboardData.stats.returnedCount, 2), icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', sub: 'Inbound' },
+            { label: 'OMS Restock', val: formatFullNumber(dashboardData.stats.restockCount, 2), icon: <Archive/>, col: 'bg-amber-50 text-amber-600', sub: 'Scanned' },
             { label: 'Revenue Pool', val: formatCurrency(dashboardData.stats.totalRevenue), icon: <DollarSign/>, col: 'bg-slate-950 text-white', sub: 'Full Statement' },
           ].map((s, i) => (
             <div key={i} className="p-6 rounded-[2.5rem] border border-slate-100 shadow-sm bg-white hover:border-blue-200 transition-all group relative overflow-hidden">
@@ -261,14 +263,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                         <div className="w-8 h-8 bg-white border border-slate-200 rounded-lg flex items-center justify-center text-[10px] font-black text-slate-900 group-hover:border-blue-200">{i+1}</div>
                         <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight truncate max-w-[180px]">{name}</span>
                       </div>
-                      <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[10px] font-black">×{formatFullNumber(count)}</span>
+                      <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[10px] font-black">×{formatFullNumber(count, 2)}</span>
                     </div>
                   ))
                 )}
             </div>
         </div>
 
-        {/* RETURNED STOCK INTELLIGENCE - UPDATED TO SHOW SCANNED ONLY */}
         <div className="lg:col-span-4 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col border-t-rose-600 border-t-4">
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-6">
                 <RotateCcw size={18} className="text-rose-600"/> Scanned Return Intelligence
@@ -289,7 +290,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                             <span className="text-[8px] font-mono text-rose-500 font-bold uppercase">{data.sku}</span>
                         </div>
                       </div>
-                      <span className="bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-rose-200">×{formatFullNumber(data.count)}</span>
+                      <span className="bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-rose-200">×{formatFullNumber(data.count, 2)}</span>
                     </div>
                   ))
                 )}
@@ -306,10 +307,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             </h3>
             <div className="grid grid-cols-2 gap-4 relative z-10">
               {[
-                  { label: "Today's Inbound", val: formatFullNumber(dashboardData.today.todayOrders), icon: <Target className="text-blue-400" /> },
-                  { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShipped), icon: <Truck className="text-amber-400" /> },
+                  { label: "Today's Inbound", val: formatFullNumber(dashboardData.today.todayOrders, 2), icon: <Target className="text-blue-400" /> },
+                  { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShipped, 2), icon: <Truck className="text-amber-400" /> },
                   { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
-                  { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturns), icon: <RotateCcw className="text-rose-400" /> },
+                  { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturns, 2), icon: <RotateCcw className="text-rose-400" /> },
               ].map((stat, i) => (
                   <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
                       <div className="flex items-center gap-3 mb-2">
@@ -354,12 +355,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                                 <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-xs font-black">{user.name.slice(0, 2).toUpperCase()}</div>
                                 <div>
                                     <p className="text-xs font-black uppercase leading-none">{user.name}</p>
-                                    <p className="text-[8px] font-black text-slate-500 uppercase mt-1">{formatFullNumber(user.interactions)} Interacts</p>
+                                    <p className="text-[8px] font-black text-slate-500 uppercase mt-1">{formatFullNumber(user.interactions, 2)} Interactions</p>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-sm font-black text-emerald-400">+{formatFullNumber(user.confirms)}</p>
+                                <p className="text-sm font-black text-emerald-400">+{formatFullNumber(user.confirms, 2)}</p>
                                 <p className="text-[8px] font-black text-slate-500 uppercase">Confirmed</p>
+                            </div>
+                        </div>
+                        {/* RESTORED STATUS BREAKDOWN */}
+                        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5">
+                            <div className="text-center">
+                                <div className="flex items-center justify-center gap-1 text-rose-500 mb-1"><XCircle size={10}/> <span className="text-[8px] font-black uppercase tracking-widest">Rejects</span></div>
+                                <p className="text-xs font-black">{formatFullNumber(user.rejects, 2)}</p>
+                            </div>
+                            <div className="text-center">
+                                <div className="flex items-center justify-center gap-1 text-amber-500 mb-1"><PhoneOff size={10}/> <span className="text-[8px] font-black uppercase tracking-widest">No Ans</span></div>
+                                <p className="text-xs font-black">{formatFullNumber(user.noAnswers, 2)}</p>
+                            </div>
+                            <div className="text-center">
+                                <div className="flex items-center justify-center gap-1 text-blue-400 mb-1"><UserPlus size={10}/> <span className="text-[8px] font-black uppercase tracking-widest">Open</span></div>
+                                <p className="text-xs font-black">{formatFullNumber(user.openLeads, 2)}</p>
                             </div>
                         </div>
                     </div>
@@ -378,6 +394,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                             <th className="rounded-l-3xl">Product SKU</th>
                             <th className="text-center">Gross Sales</th>
                             <th className="text-center">Delivered</th>
+                            <th className="text-center">Returns</th>
                             <th className="text-right rounded-r-3xl pr-10">Net Profit (Est.)</th>
                         </tr>
                     </thead>
@@ -390,8 +407,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                                         <span className="text-[9px] font-mono font-bold text-blue-500 mt-1">ID: {p.sku}</span>
                                     </div>
                                 </td>
-                                <td className="text-center"><span className="text-xs font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.salesCount)}</span></td>
-                                <td className="text-center"><span className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.delivered)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.salesCount, 2)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.delivered, 2)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-rose-600 bg-rose-50 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.returned, 2)}</span></td>
                                 <td className="text-right pr-10">
                                     <div className="flex flex-col items-end">
                                         <span className="text-sm font-black text-slate-950">{formatCurrency(p.profit)}</span>
