@@ -6,7 +6,8 @@ import {
   Database, RefreshCcw, Globe, Plus, Trash2, Cloud, 
   AlertTriangle, Settings, Layout, Globe2, ShieldAlert, Key, Zap,
   FileUp, DatabaseBackup, CheckCircle2, AlertCircle, HardDriveDownload,
-  Users, ChevronDown, Rocket, Lock, Store, ImageIcon, ShieldCheck, Mail
+  Users, ChevronDown, Rocket, Lock, Store, ImageIcon, ShieldCheck, Mail,
+  Eraser, Flame
 } from 'lucide-react';
 
 export const DevAdmin: React.FC = () => {
@@ -24,7 +25,7 @@ export const DevAdmin: React.FC = () => {
   // Migration States
   const [migrationTenantId, setMigrationTenantId] = useState('');
   const [migrationFile, setMigrationFile] = useState<File | null>(null);
-  const [migrationProgress, setMigrationProgress] = useState<'IDLE' | 'PARSING' | 'SYNCING' | 'SUCCESS' | 'ERROR'>('IDLE');
+  const [migrationProgress, setMigrationProgress] = useState<'IDLE' | 'PARSING' | 'SYNCING' | 'SUCCESS' | 'ERROR' | 'PURGING'>('IDLE');
   const [migrationLog, setMigrationLog] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -73,7 +74,7 @@ export const DevAdmin: React.FC = () => {
   };
 
   const mapLegacyStatus = (s: string): OrderStatus => {
-    const status = (s || '').toUpperCase();
+    const status = (s || '').trim().toUpperCase();
     if (status.includes('PENDING')) return OrderStatus.PENDING;
     if (status.includes('CONFIRM')) return OrderStatus.CONFIRMED;
     if (status.includes('SHIP')) return OrderStatus.SHIPPED;
@@ -87,14 +88,29 @@ export const DevAdmin: React.FC = () => {
 
   const parseSafeDate = (dateStr: string): string => {
     if (!dateStr) return new Date().toISOString();
-    // Replace space with T for standard ISO parsing if it's "YYYY-MM-DD HH:mm:ss"
     const normalized = dateStr.trim().replace(' ', 'T');
     const d = new Date(normalized);
-    if (isNaN(d.getTime())) {
-      // Fallback for non-standard formats, try to return current time to avoid crash
-      return new Date().toISOString();
-    }
+    if (isNaN(d.getTime())) return new Date().toISOString();
     return d.toISOString();
+  };
+
+  // Robust CSV Line Parser that handles empty fields correctly
+  const parseCsvLine = (text: string) => {
+    const result = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      if (char === '"') inQuotes = !inQuotes;
+      else if (char === ',' && !inQuotes) {
+        result.push(cur.trim());
+        cur = '';
+      } else {
+        cur += char;
+      }
+    }
+    result.push(cur.trim());
+    return result;
   };
 
   const handleMigration = async () => {
@@ -131,13 +147,14 @@ export const DevAdmin: React.FC = () => {
         };
 
         const orders: Order[] = [];
-        setMigrationLog(`Parsing ${lines.length - 1} legacy records...`);
+        setMigrationLog(`Analyzing ${lines.length - 1} records...`);
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
           
-          const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+          // Use robust line parser
+          const parts = parseCsvLine(line);
           const cleanVal = (val: string) => (val || '').replace(/^"|"$/g, '').trim();
 
           const phone = cleanVal(parts[idx.phone]).replace('p:', '').replace(/\s/g, '');
@@ -168,7 +185,7 @@ export const DevAdmin: React.FC = () => {
         }
 
         setMigrationProgress('SYNCING');
-        setMigrationLog(`Pushing ${orders.length} orders to cluster [${migrationTenantId}]...`);
+        setMigrationLog(`Injecting ${orders.length} orders to cluster...`);
         
         const chunkSize = 100;
         for (let i = 0; i < orders.length; i += chunkSize) {
@@ -190,6 +207,41 @@ export const DevAdmin: React.FC = () => {
     };
 
     reader.readAsText(migrationFile);
+  };
+
+  const handlePurgeCluster = async () => {
+    if (!migrationTenantId) return alert("Select target cluster node first.");
+    const tenant = tenants.find(t => t.id === migrationTenantId);
+    if (!confirm(`CRITICAL WARNING: This will permanently erase ALL orders in the [${tenant?.settings.shopName || migrationTenantId}] cluster. There is no undo. Proceed?`)) return;
+    
+    setMigrationProgress('PURGING');
+    setMigrationLog('Querying cluster registry for purging...');
+    
+    try {
+      let page = 1;
+      let totalPurged = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        setMigrationLog(`Fetching page ${page} for purging...`);
+        const response = await db.getOrders({ tenantId: migrationTenantId, page, limit: 100 });
+        if (response.data.length === 0) {
+          hasMore = false;
+        } else {
+          setMigrationLog(`Erasing ${response.data.length} records...`);
+          await Promise.all(response.data.map(o => db.deleteOrder(o.id, migrationTenantId)));
+          totalPurged += response.data.length;
+          if (response.data.length < 100) hasMore = false;
+          else page++; // Note: Since we are deleting, page 1 will always have the next 100, but incrementing is safer in case of indexing lag.
+        }
+      }
+
+      setMigrationProgress('SUCCESS');
+      setMigrationLog(`Cluster Sanitize Complete: ${totalPurged} orders purged.`);
+    } catch (err: any) {
+      setMigrationProgress('ERROR');
+      setMigrationLog(`Purge Failure: ${err.message}`);
+    }
   };
 
   const handleDeleteTenant = async (id: string) => {
@@ -263,61 +315,86 @@ export const DevAdmin: React.FC = () => {
 
       {view === 'MIGRATION' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              <div className="lg:col-span-7 bg-white p-12 rounded-[4rem] border border-slate-100 shadow-sm space-y-10">
-                  <div className="flex items-center gap-4 border-b border-slate-50 pb-8">
-                      <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-[1.5rem] flex items-center justify-center shadow-inner">
-                          <DatabaseBackup size={28} />
+              <div className="lg:col-span-7 space-y-8">
+                  <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-sm space-y-10">
+                      <div className="flex items-center gap-4 border-b border-slate-50 pb-8">
+                          <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-[1.5rem] flex items-center justify-center shadow-inner">
+                              <DatabaseBackup size={28} />
+                          </div>
+                          <div>
+                              <h3 className="text-2xl font-black uppercase text-slate-900 leading-none tracking-tighter">Migration Protocol</h3>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Legacy CSV Synchronization</p>
+                          </div>
                       </div>
-                      <div>
-                          <h3 className="text-2xl font-black uppercase text-slate-900 leading-none tracking-tighter">Migration Protocol</h3>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Legacy CSV Synchronization</p>
+
+                      <div className="space-y-8">
+                          <div className="space-y-3">
+                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Cluster Node</label>
+                              <div className="relative">
+                                  <select 
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 text-sm font-black text-slate-900 outline-none appearance-none focus:ring-4 focus:ring-blue-100 transition-all"
+                                      value={migrationTenantId}
+                                      onChange={e => setMigrationTenantId(e.target.value)}
+                                  >
+                                      <option value="">Select Destination...</option>
+                                      {tenants.map(t => <option key={t.id} value={t.id}>{t.settings.shopName} ({t.id})</option>)}
+                                  </select>
+                                  <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+                              </div>
+                          </div>
+
+                          <div className="space-y-3">
+                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Legacy CSV Payload</label>
+                              <div 
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className={`group border-4 border-dashed border-slate-50 rounded-[2.5rem] py-16 flex flex-col items-center justify-center cursor-pointer transition-all ${migrationFile ? 'bg-blue-50 border-blue-200' : 'hover:border-blue-100 hover:bg-slate-50/50'}`}
+                              >
+                                  {migrationFile ? (
+                                      <>
+                                          <HardDriveDownload size={48} className="text-blue-600 mb-4 animate-bounce" />
+                                          <p className="text-sm font-black text-blue-600 uppercase">{migrationFile.name}</p>
+                                          <p className="text-[9px] font-bold text-blue-400 uppercase mt-2">{(migrationFile.size / 1024).toFixed(2)} KB Loaded</p>
+                                      </>
+                                  ) : (
+                                      <>
+                                          <FileUp size={48} className="text-slate-200 group-hover:text-blue-200 group-hover:scale-110 transition-all mb-4" />
+                                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select CSV Payload</p>
+                                      </>
+                                  )}
+                                  <input ref={fileInputRef} type="file" accept=".csv" onChange={e => setMigrationFile(e.target.files?.[0] || null)} className="hidden" />
+                              </div>
+                          </div>
+
+                          <button 
+                            onClick={handleMigration} 
+                            disabled={migrationProgress === 'PARSING' || migrationProgress === 'SYNCING' || migrationProgress === 'PURGING'}
+                            className="w-full py-6 bg-blue-600 text-white rounded-[2rem] font-black text-[11px] uppercase tracking-[0.3em] shadow-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
+                          >
+                            <Zap size={18}/> {migrationProgress === 'SYNCING' ? 'SYNCHRONIZING CLUSTER...' : 'Execute Migration Protocol'}
+                          </button>
                       </div>
                   </div>
 
-                  <div className="space-y-8">
-                      <div className="space-y-3">
-                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Cluster Node</label>
-                          <div className="relative">
-                              <select 
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 text-sm font-black text-slate-900 outline-none appearance-none focus:ring-4 focus:ring-blue-100 transition-all"
-                                  value={migrationTenantId}
-                                  onChange={e => setMigrationTenantId(e.target.value)}
-                              >
-                                  <option value="">Select Destination...</option>
-                                  {tenants.map(t => <option key={t.id} value={t.id}>{t.settings.shopName} ({t.id})</option>)}
-                              </select>
-                              <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+                  {/* Cleanup Tools Section */}
+                  <div className="bg-rose-50 border-2 border-rose-100 p-10 rounded-[3rem] space-y-6">
+                      <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg">
+                              <Eraser size={24} />
+                          </div>
+                          <div>
+                              <h3 className="text-xl font-black uppercase text-rose-900 leading-none">Cluster Sanitize</h3>
+                              <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mt-1">Bulk Cleanup Utilities</p>
                           </div>
                       </div>
-
-                      <div className="space-y-3">
-                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Legacy CSV Payload</label>
-                          <div 
-                              onClick={() => fileInputRef.current?.click()}
-                              className={`group border-4 border-dashed border-slate-50 rounded-[2.5rem] py-16 flex flex-col items-center justify-center cursor-pointer transition-all ${migrationFile ? 'bg-blue-50 border-blue-200' : 'hover:border-blue-100 hover:bg-slate-50/50'}`}
-                          >
-                              {migrationFile ? (
-                                  <>
-                                      <HardDriveDownload size={48} className="text-blue-600 mb-4 animate-bounce" />
-                                      <p className="text-sm font-black text-blue-600 uppercase">{migrationFile.name}</p>
-                                      <p className="text-[9px] font-bold text-blue-400 uppercase mt-2">{(migrationFile.size / 1024).toFixed(2)} KB Loaded</p>
-                                  </>
-                              ) : (
-                                  <>
-                                      <FileUp size={48} className="text-slate-200 group-hover:text-blue-200 group-hover:scale-110 transition-all mb-4" />
-                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select CSV Payload</p>
-                                  </>
-                              )}
-                              <input ref={fileInputRef} type="file" accept=".csv" onChange={e => setMigrationFile(e.target.files?.[0] || null)} className="hidden" />
-                          </div>
-                      </div>
-
+                      <p className="text-[11px] font-bold text-rose-600/70 uppercase leading-relaxed px-2">
+                        Use these tools to wipe historical cluster data before a fresh migration or to decommission old registry entries.
+                      </p>
                       <button 
-                        onClick={handleMigration} 
-                        disabled={migrationProgress === 'PARSING' || migrationProgress === 'SYNCING'}
-                        className="w-full py-6 bg-blue-600 text-white rounded-[2rem] font-black text-[11px] uppercase tracking-[0.3em] shadow-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
+                        onClick={handlePurgeCluster}
+                        disabled={!migrationTenantId || migrationProgress === 'SYNCING' || migrationProgress === 'PURGING'}
+                        className="w-full py-5 bg-rose-600 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-rose-700 transition-all flex items-center justify-center gap-3 disabled:opacity-30"
                       >
-                         <Zap size={18}/> {migrationProgress === 'SYNCING' ? 'SYNCHRONIZING CLUSTER...' : 'Execute Migration Protocol'}
+                         <Flame size={18} /> {migrationProgress === 'PURGING' ? 'PURGING CLUSTER REGISTRY...' : 'Purge All Cluster Orders'}
                       </button>
                   </div>
               </div>
@@ -353,7 +430,7 @@ export const DevAdmin: React.FC = () => {
                                           </div>
                                       </div>
                                       
-                                      {(migrationProgress === 'PARSING' || migrationProgress === 'SYNCING') && (
+                                      {(migrationProgress === 'PARSING' || migrationProgress === 'SYNCING' || migrationProgress === 'PURGING') && (
                                           <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
                                               <div className="bg-blue-600 h-full animate-progress-indeterminate"></div>
                                           </div>
