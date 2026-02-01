@@ -48,29 +48,53 @@ export const handler: Handler = async (event, context) => {
 
     if (path === '/health') return { statusCode: 200, headers, body: JSON.stringify({ status: 'connected' }) };
 
+    // SAFE BODY PARSING
+    let bodyData: any = {};
+    if (event.body && (method === 'POST' || method === 'PUT')) {
+        try { bodyData = JSON.parse(event.body); } catch(e) {
+          // If not JSON, try to handle as URL encoded if necessary, but frontend sends JSON
+        }
+    }
+
+    // MANDATORY: Extract tenant context early
+    const tenantId = event.queryStringParameters?.tenantId || bodyData.tenantId;
+    let activeDb = centralDb;
+    let tenantSettings: any = null;
+
+    if (tenantId) {
+      const tenantConfig = await tenantsCol.findOne({ id: tenantId });
+      if (tenantConfig) {
+        tenantSettings = tenantConfig.settings;
+        if (tenantConfig.mongoUri) {
+          const tenantClient = await getConnectedClient(tenantConfig.mongoUri);
+          activeDb = tenantClient.db();
+        }
+      }
+    }
+
+    if (path === '/login' && method === 'POST') {
+      const { username, password } = bodyData;
+      const user = await usersCol.findOne({ username, password });
+      if (user) return { statusCode: 200, headers, body: JSON.stringify(user) };
+      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid credentials' }) };
+    }
+
     if (path === '/cities') {
       if (method === 'GET') {
         const cityDoc = await citiesCol.findOne({ id: 'master_list' });
         return { statusCode: 200, headers, body: JSON.stringify({ cities: cityDoc?.cities || [] }) };
       }
       if (method === 'POST') {
-        const { cities } = JSON.parse(event.body || '{}');
+        const { cities } = bodyData;
         await citiesCol.updateOne({ id: 'master_list' }, { $set: { cities } }, { upsert: true });
         return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
       }
     }
 
-    if (path === '/login' && method === 'POST') {
-      const { username, password } = JSON.parse(event.body || '{}');
-      const user = await usersCol.findOne({ username, password });
-      if (user) return { statusCode: 200, headers, body: JSON.stringify(user) };
-      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid credentials' }) };
-    }
-
     if (path === '/tenants') {
       if (method === 'GET') return { statusCode: 200, headers, body: JSON.stringify(await tenantsCol.find({}).toArray()) };
       if (method === 'POST' || method === 'PUT') {
-        const { tenant, adminUser } = JSON.parse(event.body || '{}');
+        const { tenant, adminUser } = bodyData;
         await tenantsCol.updateOne({ id: tenant.id }, { $set: tenant }, { upsert: true });
         if (adminUser) await usersCol.updateOne({ tenantId: tenant.id, role: 'SUPER_ADMIN' }, { $set: adminUser }, { upsert: true });
         return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
@@ -85,11 +109,10 @@ export const handler: Handler = async (event, context) => {
 
     if (path === '/users') {
       if (method === 'GET') {
-        const tenantId = event.queryStringParameters?.tenantId;
         return { statusCode: 200, headers, body: JSON.stringify(await usersCol.find({ tenantId }).toArray()) };
       }
       if (method === 'POST') {
-        const user = JSON.parse(event.body || '{}');
+        const user = bodyData;
         await usersCol.updateOne({ id: user.id }, { $set: user }, { upsert: true });
         return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
       }
@@ -97,28 +120,6 @@ export const handler: Handler = async (event, context) => {
         const id = event.queryStringParameters?.id;
         await usersCol.deleteOne({ id });
         return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
-      }
-    }
-
-    // SAFE BODY PARSING
-    let bodyData = {};
-    if (event.body && (method === 'POST' || method === 'PUT')) {
-        try { bodyData = JSON.parse(event.body); } catch(e) {}
-    }
-
-    // HARDENED TENANT EXTRACTION
-    const tenantId = event.queryStringParameters?.tenantId || (bodyData as any).tenantId;
-    let activeDb = centralDb;
-    let tenantSettings = null;
-
-    if (tenantId) {
-      const tenantConfig = await tenantsCol.findOne({ id: tenantId });
-      if (tenantConfig) {
-        tenantSettings = tenantConfig.settings;
-        if (tenantConfig.mongoUri) {
-          const tenantClient = await getConnectedClient(tenantConfig.mongoUri);
-          activeDb = tenantClient.db();
-        }
       }
     }
 
@@ -137,7 +138,6 @@ export const handler: Handler = async (event, context) => {
         const endDate = event.queryStringParameters?.endDate;
 
         const query: any = { tenantId };
-
         if (status !== 'ALL') {
           if (status === 'TODAY_SHIPPED') {
             const today = new Date();
@@ -164,11 +164,10 @@ export const handler: Handler = async (event, context) => {
 
         const total = await ordersCol.countDocuments(query);
         const data = await ordersCol.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray();
-
         return { statusCode: 200, headers, body: JSON.stringify({ data, total, page, limit }) };
       }
       if (method === 'POST') {
-        const { order, orders } = bodyData as any;
+        const { order, orders } = bodyData;
         if (orders) {
           const ops = orders.map((o: any) => ({ updateOne: { filter: { id: o.id }, update: { $set: { ...o, tenantId } }, upsert: true } }));
           await ordersCol.bulkWrite(ops);
@@ -198,7 +197,7 @@ export const handler: Handler = async (event, context) => {
         const productsCol = activeDb.collection('products');
         if (method === 'GET') return { statusCode: 200, headers, body: JSON.stringify(await productsCol.find({ tenantId }).toArray()) };
         if (method === 'POST') {
-            const { product } = bodyData as any;
+            const { product } = bodyData;
             await productsCol.updateOne({ id: product.id }, { $set: { ...product, tenantId } }, { upsert: true });
             return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
         }
@@ -210,7 +209,7 @@ export const handler: Handler = async (event, context) => {
     }
 
     if (path === '/ship-order' && method === 'POST') {
-        const { order } = bodyData as any;
+        const { order } = bodyData;
         const ordersCol = activeDb.collection('orders');
         if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Courier configuration missing." }) };
 
@@ -240,14 +239,15 @@ export const handler: Handler = async (event, context) => {
         });
         
         let data: any;
+        const rawResponse = await response.text();
         try {
-            data = await response.json();
+            data = JSON.parse(rawResponse);
         } catch(e) {
-            const text = await response.text();
-            return { statusCode: 400, headers, body: JSON.stringify({ error: `Courier Error: ${text.slice(0, 100)}` }) };
+            // IF RESPONSE IS NOT JSON: Return the raw response string as the error
+            return { statusCode: 400, headers, body: JSON.stringify({ error: `Logistics Error: ${rawResponse.slice(0, 150)}` }) };
         }
 
-        if (Number(data.status) === 200) {
+        if (data && Number(data.status) === 200) {
             const updated = { 
                 ...order, 
                 status: 'SHIPPED', 
@@ -258,11 +258,11 @@ export const handler: Handler = async (event, context) => {
             await ordersCol.updateOne({ id: order.id }, { $set: updated });
             return { statusCode: 200, headers, body: JSON.stringify(updated) };
         }
-        return { statusCode: 400, headers, body: JSON.stringify({ error: data.message || 'Handshake failed' }) };
+        return { statusCode: 400, headers, body: JSON.stringify({ error: data?.message || 'Handshake failed: Status not 200' }) };
     }
 
     if (path === '/process-return' && method === 'POST') {
-        const { trackingOrId } = bodyData as any;
+        const { trackingOrId } = bodyData;
         const ordersCol = activeDb.collection('orders');
         const order = await ordersCol.findOne({ $or: [{ id: trackingOrId }, { trackingNumber: trackingOrId }] });
         if (order) {

@@ -100,32 +100,32 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`CRITICAL: This will permanently wipe ${selectedIds.length} nodes. Proceed?`)) return;
+    if (!confirm(`CRITICAL: Registry Wipe. Permanent removal of ${selectedIds.length} nodes. Continue?`)) return;
     setBulkProcessing(true);
     setBulkProgressMsg('INITIATING WIPE...');
     try {
+      // Pass tenantId explicitly in params to ensure backend picks it up
       await db.deleteOrder(selectedIds.join(','), tenantId);
       setSelectedIds([]);
       await loadData();
       if (onRefresh) onRefresh();
-      alert(`Wipe Successful: ${selectedIds.length} records purged.`);
+      alert(`Wipe Successful: Registry sanitized.`);
     } catch (e: any) {
-      alert(`Protocol Failure: ${e.message}`);
+      alert(`Wipe Failed: ${e.message}`);
     } finally { 
-      setBulkProcessing(false);
+      setBulkProcessing(false); 
       setBulkProgressMsg('');
     }
   };
 
   const handleBulkShip = async () => {
-    if (!confirm(`Verify: Transmit ${selectedIds.length} orders to Logistics?`)) return;
+    if (!confirm(`Logistics Sync: Transmit ${selectedIds.length} verified leads to Courier?`)) return;
     setBulkProcessing(true);
     
     let successCount = 0;
     let failCount = 0;
-    const errors: string[] = [];
+    let lastError = '';
 
-    // Clone selected IDs to iterate
     const targetIds = [...selectedIds];
 
     for (let i = 0; i < targetIds.length; i++) {
@@ -133,20 +133,18 @@ export const OrderList: React.FC<OrderListProps> = ({
         const order = orders.find(o => o.id === id);
         
         if (order) {
-            setBulkProgressMsg(`TRANSMITTING ${i + 1}/${targetIds.length}: ${order.customerName}...`);
-            
+            setBulkProgressMsg(`SHIPPING ${i+1}/${targetIds.length}: ${order.customerName}`);
             try {
-                // Perform individual ship handshake
+                // RUN INDIVIDUAL SHIP TO PREVENT BATCH ABORT ON SINGLE FAILURE
                 await db.shipOrder(order, tenantId);
                 successCount++;
             } catch (err: any) {
                 failCount++;
-                errors.push(`${order.customerName}: ${err.message}`);
-                console.error(`Handshake failed for ${order.id}:`, err);
+                lastError = err.message;
+                console.error(`Dispatch failed for ${order.id}:`, err);
             }
-            
-            // Short delay to respect API rate limits and connection stability
-            await new Promise(r => setTimeout(r, 200));
+            // Cooldown to respect API throughput limits
+            await new Promise(r => setTimeout(r, 250));
         }
     }
 
@@ -154,9 +152,9 @@ export const OrderList: React.FC<OrderListProps> = ({
     setBulkProgressMsg('');
     
     if (failCount > 0) {
-        alert(`Bulk Dispatch Complete.\n\n- SUCCESS: ${successCount}\n- FAILED: ${failCount}\n\nLast error: ${errors[errors.length - 1]}`);
+        alert(`Bulk Dispatch Result:\n- SUCCESS: ${successCount}\n- FAILED: ${failCount}\n\nLast Error: ${lastError}`);
     } else {
-        alert(`Logistics Protocol Success: ${successCount} Waybills Assigned.`);
+        alert(`Logistics Protocol Success: ${successCount} Waybills generated.`);
     }
     
     setSelectedIds([]);

@@ -109,6 +109,8 @@ async function adjustInventory(db, items, tenantId, type = 'DEDUCT') {
 
 // --- CORE BUSINESS API ---
 
+app.get('/api/health', (req, res) => res.json({ status: 'connected' }));
+
 app.post('/api/login', async (req, res) => {
     try {
         const db = await connectCentral();
@@ -227,21 +229,7 @@ app.post('/api/orders', async (req, res) => {
                 } 
             }));
             await col.bulkWrite(ops);
-            for (const o of orders) {
-                if (o.status === 'CONFIRMED' || o.status === 'SHIPPED') {
-                    await adjustInventory(db, o.items, tenantId, 'DEDUCT');
-                }
-            }
         } else if (order) {
-            const existing = await col.findOne({ id: order.id });
-            const oldStatus = existing?.status;
-            const newStatus = order.status;
-            const isBecomingConfirmed = ['PENDING', 'OPEN_LEAD', 'NO_ANSWER', 'REJECTED', 'HOLD'].includes(oldStatus) && 
-                                       ['CONFIRMED', 'SHIPPED'].includes(newStatus);
-
-            if (isBecomingConfirmed) {
-                await adjustInventory(db, order.items, tenantId, 'DEDUCT');
-            }
             await col.updateOne({ id: order.id }, { $set: { ...clean(order), tenantId } }, { upsert: true });
         }
         res.json({ success: true });
@@ -303,14 +291,7 @@ app.post('/api/process-return', async (req, res) => {
         const order = await ordersCol.findOne({ $or: [{ id: trackingOrId }, { trackingNumber: trackingOrId }] });
         
         if (order) {
-            if (order.status !== 'RETURN_COMPLETED') {
-                await adjustInventory(db, order.items, tenantId, 'RESTOCK');
-            }
-            const updated = { 
-                ...order, 
-                status: 'RETURN_COMPLETED',
-                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'Milky Way Scan: Return Processed & Stock Restored', timestamp: new Date().toISOString(), user: 'OMS Scan' }]
-            };
+            const updated = { ...order, status: 'RETURN_COMPLETED' };
             await ordersCol.updateOne({ id: order.id }, { $set: clean(updated) });
             return res.json(updated);
         }
@@ -327,7 +308,7 @@ app.post('/api/ship-order', async (req, res) => {
         const tenantSettings = tenantDoc?.settings;
         
         if (!tenantSettings || !tenantSettings.courierApiKey) {
-            return res.status(400).json({ error: "Logistics credentials missing in cluster configuration." });
+            return res.status(400).json({ error: "Logistics credentials missing." });
         }
 
         const cleanOrderId = order.id.replace(/\D/g, '').slice(-10); 
@@ -341,12 +322,13 @@ app.post('/api/ship-order', async (req, res) => {
         formData.append('recipient_city', (order.customerCity || 'Colombo').toString());
         formData.append('amount', Math.round(order.totalAmount).toString());
 
-        const isExistingMode = tenantSettings.courierMode === 'EXISTING_WAYBILL';
-        const targetUrl = isExistingMode 
+        const targetUrl = tenantSettings.courierMode === 'EXISTING_WAYBILL' 
             ? 'https://www.fdedomestic.com/api/parcel/existing_waybill_api_v1.php'
             : (tenantSettings.courierApiUrl || 'https://www.fdedomestic.com/api/parcel/new_api_v1.php');
 
-        if (isExistingMode) formData.append('waybill_id', (order.trackingNumber || '').toString());
+        if (tenantSettings.courierMode === 'EXISTING_WAYBILL') {
+            formData.append('waybill_id', (order.trackingNumber || '').toString());
+        }
 
         const response = await fetch(targetUrl, {
             method: 'POST',
@@ -354,29 +336,26 @@ app.post('/api/ship-order', async (req, res) => {
             body: formData
         });
         
+        const rawText = await response.text();
         let data;
         try {
-            data = await response.json();
+            data = JSON.parse(rawText);
         } catch (err) {
-            return res.status(500).json({ error: `External Logistics API error: ${response.status} ${response.statusText}` });
+            return res.status(400).json({ error: `Logistics Text Response: ${rawText.slice(0, 150)}` });
         }
 
-        if (Number(data.status) === 200) {
-            const existing = await db.collection('orders').findOne({ id: order.id });
-            if (!['CONFIRMED', 'SHIPPED'].includes(existing?.status)) {
-                await adjustInventory(db, order.items, tenantId, 'DEDUCT');
-            }
+        if (data && Number(data.status) === 200) {
             const updatedOrder = { 
                 ...order, 
                 status: 'SHIPPED', 
                 shippedAt: new Date().toISOString(), 
                 trackingNumber: data.waybill_no || order.trackingNumber,
-                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'Milky Way Logistics Handshake: Successful', timestamp: new Date().toISOString(), user: 'OMS Connector' }]
+                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'Logistics Handshake: Successful', timestamp: new Date().toISOString(), user: 'OMS Connector' }]
             };
             await db.collection('orders').updateOne({ id: order.id }, { $set: clean(updatedOrder) });
             res.json(updatedOrder);
         } else {
-            res.status(400).json({ error: `Logistics Dispatch Denied: ${data.message || 'Handshake failed'}` });
+            res.status(400).json({ error: data?.message || 'Logistics Handshake Denied' });
         }
     } catch (e) { res.status(500).json({ error: `System Handshake Failure: ${e.message}` }); }
 });
@@ -424,6 +403,6 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, async () => {
-    console.log(`>>> MW-OMS Active on Port ${PORT}`);
+    console.log(`>>> MW-OMS Local Node Port ${PORT}`);
     try { await connectCentral(); } catch (e) {}
 });
