@@ -100,7 +100,13 @@ export const handler: Handler = async (event, context) => {
       }
     }
 
-    const tenantId = event.queryStringParameters?.tenantId || JSON.parse(event.body || '{}').tenantId;
+    // SAFE BODY PARSING
+    let bodyData = {};
+    if (event.body && (method === 'POST' || method === 'PUT')) {
+        try { bodyData = JSON.parse(event.body); } catch(e) {}
+    }
+
+    const tenantId = event.queryStringParameters?.tenantId || (bodyData as any).tenantId;
     let activeDb = centralDb;
     let tenantSettings = null;
 
@@ -121,7 +127,6 @@ export const handler: Handler = async (event, context) => {
         const id = event.queryStringParameters?.id;
         if (id) return { statusCode: 200, headers, body: JSON.stringify(await ordersCol.findOne({ id })) };
 
-        // Server-Side Pagination & Filtering
         const page = parseInt(event.queryStringParameters?.page || '1');
         const limit = parseInt(event.queryStringParameters?.limit || '50');
         const search = event.queryStringParameters?.search || '';
@@ -141,17 +146,12 @@ export const handler: Handler = async (event, context) => {
             query.status = status;
           }
         }
-
-        if (productId) {
-          query['items.productId'] = productId;
-        }
-
+        if (productId) query['items.productId'] = productId;
         if (startDate || endDate) {
           query.createdAt = {};
           if (startDate) query.createdAt.$gte = startDate;
           if (endDate) query.createdAt.$lte = endDate + 'T23:59:59';
         }
-
         if (search) {
           query.$or = [
             { id: { $regex: search, $options: 'i' } },
@@ -162,20 +162,12 @@ export const handler: Handler = async (event, context) => {
         }
 
         const total = await ordersCol.countDocuments(query);
-        const data = await ordersCol.find(query)
-          .sort({ createdAt: -1 })
-          .skip((page - 1) * limit)
-          .limit(limit)
-          .toArray();
+        const data = await ordersCol.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray();
 
-        return { 
-          statusCode: 200, 
-          headers, 
-          body: JSON.stringify({ data, total, page, limit }) 
-        };
+        return { statusCode: 200, headers, body: JSON.stringify({ data, total, page, limit }) };
       }
       if (method === 'POST') {
-        const { order, orders } = JSON.parse(event.body || '{}');
+        const { order, orders } = bodyData as any;
         if (orders) {
           const ops = orders.map((o: any) => ({ updateOne: { filter: { id: o.id }, update: { $set: { ...o, tenantId } }, upsert: true } }));
           await ordersCol.bulkWrite(ops);
@@ -185,9 +177,17 @@ export const handler: Handler = async (event, context) => {
         return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
       }
       if (method === 'DELETE') {
-        const id = event.queryStringParameters?.id;
-        await ordersCol.deleteOne({ id });
-        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+        const { id, purge } = event.queryStringParameters || {};
+        if (purge === 'true') {
+          const result = await ordersCol.deleteMany({ tenantId });
+          return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
+        }
+        if (id) {
+          const ids = id.split(',');
+          const result = await ordersCol.deleteMany({ id: { $in: ids }, tenantId });
+          return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
+        }
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing target' }) };
       }
     }
 
@@ -195,7 +195,7 @@ export const handler: Handler = async (event, context) => {
         const productsCol = activeDb.collection('products');
         if (method === 'GET') return { statusCode: 200, headers, body: JSON.stringify(await productsCol.find({ tenantId }).toArray()) };
         if (method === 'POST') {
-            const { product } = JSON.parse(event.body || '{}');
+            const { product } = bodyData as any;
             await productsCol.updateOne({ id: product.id }, { $set: { ...product, tenantId } }, { upsert: true });
             return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
         }
@@ -207,9 +207,9 @@ export const handler: Handler = async (event, context) => {
     }
 
     if (path === '/ship-order' && method === 'POST') {
-        const { order } = JSON.parse(event.body || '{}');
+        const { order } = bodyData as any;
         const ordersCol = activeDb.collection('orders');
-        if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing keys." }) };
+        if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing keys in Cluster Settings." }) };
 
         const cleanAmount = Math.round(order.totalAmount).toString();
         const formData = new URLSearchParams();
@@ -226,19 +226,40 @@ export const handler: Handler = async (event, context) => {
           ? 'https://www.fdedomestic.com/api/parcel/existing_waybill_api_v1.php'
           : (tenantSettings.courierApiUrl || 'https://www.fdedomestic.com/api/parcel/new_api_v1.php');
 
-        const response = await fetch(targetUrl, { method: 'POST', body: formData });
-        const data: any = await response.json();
+        if (tenantSettings.courierMode === 'EXISTING_WAYBILL') {
+            formData.append('waybill_id', (order.trackingNumber || '').toString());
+        }
+
+        const response = await fetch(targetUrl, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData 
+        });
+        
+        let data: any;
+        try {
+            data = await response.json();
+        } catch(e) {
+            const text = await response.text();
+            return { statusCode: 400, headers, body: JSON.stringify({ error: `Courier Error: ${text.slice(0, 100)}` }) };
+        }
 
         if (Number(data.status) === 200) {
-            const updated = { ...order, status: 'SHIPPED', trackingNumber: data.waybill_no, shippedAt: new Date().toISOString() };
+            const updated = { 
+                ...order, 
+                status: 'SHIPPED', 
+                trackingNumber: data.waybill_no || order.trackingNumber, 
+                shippedAt: new Date().toISOString(),
+                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'Logistics Handshake: Successful Waybill Assigned', timestamp: new Date().toISOString(), user: 'OMS Connector' }]
+            };
             await ordersCol.updateOne({ id: order.id }, { $set: updated });
             return { statusCode: 200, headers, body: JSON.stringify(updated) };
         }
-        return { statusCode: 400, headers, body: JSON.stringify({ error: data.message }) };
+        return { statusCode: 400, headers, body: JSON.stringify({ error: data.message || 'Handshake failed' }) };
     }
 
     if (path === '/process-return' && method === 'POST') {
-        const { trackingOrId } = JSON.parse(event.body || '{}');
+        const { trackingOrId } = bodyData as any;
         const ordersCol = activeDb.collection('orders');
         const order = await ordersCol.findOne({ $or: [{ id: trackingOrId }, { trackingNumber: trackingOrId }] });
         if (order) {
@@ -246,7 +267,7 @@ export const handler: Handler = async (event, context) => {
             await ordersCol.updateOne({ id: order.id }, { $set: updated });
             return { statusCode: 200, headers, body: JSON.stringify(updated) };
         }
-        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Not found' }) };
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Reference ID not matched.' }) };
     }
 
     if (path === '/customer-history-detailed' && method === 'GET') {
@@ -255,6 +276,18 @@ export const handler: Handler = async (event, context) => {
         const last8 = phone.slice(-8);
         const all = await activeDb.collection('orders').find({ customerPhone: { $regex: last8 + "$" } }).sort({ createdAt: -1 }).toArray();
         return { statusCode: 200, headers, body: JSON.stringify(all) };
+    }
+
+    if (path === '/customer-history' && method === 'GET') {
+        const { phone } = event.queryStringParameters || {};
+        if (!phone) return { statusCode: 200, headers, body: JSON.stringify({ count: 0, returns: 0 }) };
+        const last8 = phone.slice(-8);
+        const count = await activeDb.collection('orders').countDocuments({ customerPhone: { $regex: last8 + "$" } });
+        const returns = await activeDb.collection('orders').countDocuments({ 
+            customerPhone: { $regex: last8 + "$" }, 
+            status: { $in: ['RETURNED', 'REJECTED', 'RETURN_COMPLETED'] } 
+        });
+        return { statusCode: 200, headers, body: JSON.stringify({ count, returns }) };
     }
 
     return { statusCode: 404, headers, body: JSON.stringify({ error: 'Path not found' }) };

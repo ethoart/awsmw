@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '../services/mockBackend';
 import { Order, OrderStatus } from '../types';
 import { formatCurrency } from '../utils/helpers';
-import { Search, ChevronRight, Trash2, CheckSquare, Square, Truck, Printer, ExternalLink, ChevronLeft } from 'lucide-react';
+import { Search, ChevronRight, Trash2, CheckSquare, Square, Truck, Printer, ExternalLink, ChevronLeft, Loader2 } from 'lucide-react';
 
 interface OrderListProps {
   tenantId: string;
@@ -38,14 +38,13 @@ export const OrderList: React.FC<OrderListProps> = ({
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
-  // Reset pagination when filter or search changes
   useEffect(() => {
     setCurrentPage(1);
     setSelectedIds([]);
   }, [status, productId, startDate, endDate, debouncedSearch]);
 
-  // Debounce search input
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(search);
@@ -70,7 +69,6 @@ export const OrderList: React.FC<OrderListProps> = ({
       setOrders(response.data);
       setTotalCount(response.total);
       
-      // Fetch customer history for visible items
       if (response.data.length > 0) {
         const uniquePhones = [...new Set(response.data.map(o => o.customerPhone))];
         const historyResults = await Promise.all(uniquePhones.map(async (phone) => {
@@ -101,35 +99,51 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`CRITICAL: Destroy ${selectedIds.length} orders forever?`)) return;
-    setIsLoading(true);
+    if (!confirm(`CRITICAL: This will permanently wipe ${selectedIds.length} registry entries. Proceed?`)) return;
+    setBulkProcessing(true);
     try {
-      await Promise.all(selectedIds.map(id => db.deleteOrder(id, tenantId)));
+      // Ensure tenantId is passed for correct DB context
+      await db.deleteOrder(selectedIds.join(','), tenantId);
       setSelectedIds([]);
-      loadData();
+      await loadData();
       if (onRefresh) onRefresh();
-    } finally { setIsLoading(false); }
+      alert(`Wipe Protocol Successful: ${selectedIds.length} nodes removed.`);
+    } catch (e: any) {
+      alert(`Wipe Failed: ${e.message}`);
+    } finally { setBulkProcessing(false); }
   };
 
   const handleBulkShip = async () => {
-    if (!confirm(`Verify: Transmit ${selectedIds.length} confirmed orders?`)) return;
-    setIsLoading(true);
-    try {
-      let successCount = 0;
-      for (const id of selectedIds) {
+    if (!confirm(`Logistics Sync: Transmit ${selectedIds.length} confirmed orders?`)) return;
+    setBulkProcessing(true);
+    let successCount = 0;
+    let failCount = 0;
+    let errors: string[] = [];
+
+    // Run shipping in a loop to handle each individually so one failure doesn't stop others
+    for (const id of selectedIds) {
         const order = orders.find(o => o.id === id);
-        if (order && order.status === OrderStatus.CONFIRMED) {
-          await db.shipOrder(order, tenantId);
-          successCount++;
+        if (order && (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.PENDING || order.status === OrderStatus.OPEN_LEAD)) {
+            try {
+                await db.shipOrder(order, tenantId);
+                successCount++;
+            } catch (err: any) {
+                failCount++;
+                errors.push(`${order.customerName}: ${err.message}`);
+            }
         }
-      }
-      alert(`Logistics Success: ${successCount} Waybills generated.`);
-      setSelectedIds([]);
-      loadData();
-      if (onRefresh) onRefresh();
-    } catch (e: any) {
-      alert(`Partial Failure: ${e.message}`);
-    } finally { setIsLoading(false); }
+    }
+
+    if (failCount > 0) {
+        alert(`Bulk Dispatch Result:\n- Success: ${successCount}\n- Failed: ${failCount}\n\nLast error recorded: ${errors[errors.length - 1]}`);
+    } else {
+        alert(`Logistics Handshake Success: ${successCount} Waybills generated.`);
+    }
+    
+    setSelectedIds([]);
+    await loadData();
+    if (onRefresh) onRefresh();
+    setBulkProcessing(false);
   };
 
   const toggleSelectAll = () => {
@@ -155,23 +169,26 @@ export const OrderList: React.FC<OrderListProps> = ({
   return (
     <div className="flex flex-col h-full bg-white animate-slide-in relative">
       {selectedIds.length > 0 && (
-        <div className="absolute top-0 left-0 right-0 z-20 bg-slate-900 text-white p-4 flex items-center justify-between shadow-2xl rounded-b-2xl">
-          <span className="text-xs font-black uppercase ml-4">{selectedIds.length} Nodes Locked</span>
+        <div className="absolute top-0 left-0 right-0 z-20 bg-slate-950 text-white p-4 flex items-center justify-between shadow-2xl rounded-b-2xl border-b border-white/10">
+          <div className="flex items-center gap-4 ml-4">
+              {bulkProcessing ? <Loader2 className="animate-spin text-blue-400" size={20}/> : <CheckSquare className="text-blue-500" size={20}/>}
+              <span className="text-xs font-black uppercase">{selectedIds.length} Nodes Locked</span>
+          </div>
           <div className="flex gap-2">
-            {status === OrderStatus.CONFIRMED && (
-              <button onClick={handleBulkShip} className="bg-emerald-600 px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:bg-emerald-700">
+            {(status === 'ALL' || status === OrderStatus.CONFIRMED || status === OrderStatus.OPEN_LEAD) && (
+              <button disabled={bulkProcessing} onClick={handleBulkShip} className="bg-blue-600 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:bg-blue-700 transition-all disabled:opacity-50">
                 <Truck size={14} /> Bulk Ship
               </button>
             )}
             {onBulkAction && (
-              <button onClick={() => { onBulkAction(selectedIds); setSelectedIds([]); }} className="bg-blue-600 px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg">
+              <button disabled={bulkProcessing} onClick={() => { onBulkAction(selectedIds); setSelectedIds([]); }} className="bg-slate-800 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:bg-black transition-all disabled:opacity-50">
                 <Printer size={14} /> Label Print
               </button>
             )}
-            <button onClick={handleBulkDelete} className="bg-rose-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2">
-              <Trash2 size={14} /> Delete
+            <button disabled={bulkProcessing} onClick={handleBulkDelete} className="bg-rose-600 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-rose-700 transition-all disabled:opacity-50">
+              <Trash2 size={14} /> Wipe Registry
             </button>
-            <button onClick={() => setSelectedIds([])} className="bg-white/10 px-6 py-2 rounded-xl text-[10px] font-black uppercase">Cancel</button>
+            <button onClick={() => setSelectedIds([])} className="bg-white/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase">Cancel</button>
           </div>
         </div>
       )}

@@ -46,7 +46,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
     db.getProducts(tenantId).then(setProducts);
     db.getTenant(tenantId).then(setTenant);
     db.getGlobalCities().then(c => {
-        // Deduplicate cities
         const cityList = Array.from(new Set(c.length > 0 ? c : SRI_LANKA_CITIES_FALLBACK));
         setCities(cityList);
         setManualForm(prev => ({ ...prev, city: cityList.includes('Colombo') ? 'Colombo' : cityList[0] }));
@@ -69,7 +68,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
   }, [manualForm.phone, tenantId]);
 
   const handleManualSubmit = async () => {
-    if (!manualForm.name || !manualForm.phone || !manualForm.productId) return alert("System requires full identity and SKU.");
+    if (!manualForm.name || !manualForm.phone || !manualForm.productId || !manualForm.address) return alert("CRITICAL: Name, Phone, Address, and SKU are mandatory.");
     
     const isExistingMode = tenant?.settings.courierMode === CourierMode.EXISTING_WAYBILL;
     if (isExistingMode && !manualForm.trackingNumber) return alert("Existing Waybill ID is mandatory for this cluster mode.");
@@ -116,8 +115,16 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
     const reader = new FileReader();
     reader.onload = (event) => {
         const text = event.target?.result as string;
-        const parsed = parseCSV(text);
-        setPendingLeads(parsed);
+        const cleaned = parseCSV(text);
+        
+        if (cleaned.length === 0) {
+            alert("UPLOAD FAILED: No valid records found. Ensure CSV has Name, Address, and Phone columns.");
+            return;
+        }
+
+        setPendingLeads(cleaned);
+        setMessage({ text: `${cleaned.length} valid records indexed.`, type: 'info' });
+        setTimeout(() => setMessage(null), 5000);
     };
     reader.readAsText(file);
   };
@@ -174,7 +181,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
           </div>
         </div>
         {message && (
-            <div className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-emerald-600 text-white text-[11px] font-black uppercase tracking-widest shadow-xl animate-bounce">
+            <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl animate-bounce ${message.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
                 <CheckCircle2 size={16}/> {message.text}
             </div>
         )}
@@ -182,7 +189,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         <div className="lg:col-span-8 space-y-8">
-            
             <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
               <div className="flex items-center justify-between pb-6 border-b border-slate-50">
                 <div className="flex items-center gap-3">
@@ -257,7 +263,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
                     placeholder="Full street address..."
                   />
                 </div>
-                
                 <div className="space-y-2 relative">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">SKU Assignment</label>
                   <select 
@@ -270,7 +275,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
                   </select>
                   <ChevronDown className="absolute right-6 bottom-4 text-slate-400 pointer-events-none" size={18} />
                 </div>
-
                 <div className="space-y-2 relative">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Parcel Weight (KG)</label>
                     <div className="relative">

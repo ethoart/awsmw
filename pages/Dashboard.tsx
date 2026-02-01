@@ -2,12 +2,13 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Order, OrderStatus, Product, User } from '../types';
 import { db } from '../services/mockBackend';
-import { formatCurrency } from '../utils/helpers';
+import { formatCurrency, formatFullNumber } from '../utils/helpers';
 import { 
   RefreshCcw, DollarSign, Truck, RotateCcw, 
   Archive, Users, Calendar, ShoppingBag, Star, Activity, Box,
   Award, ListChecks, ArrowUpRight, LayoutDashboard,
-  ShieldCheck, Target, Rocket, ClipboardList, RotateCw, History as HistoryIcon
+  Target, ClipboardList, RotateCw, PackageCheck,
+  XCircle, PhoneOff, UserPlus
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, 
@@ -48,7 +49,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     setLoading(true);
     try {
       const [orderRes, fetchedProducts, fetchedTeam] = await Promise.all([
-          db.getOrders({ tenantId, limit: 5000 }), 
+          db.getOrders({ tenantId, limit: 10000 }), 
           db.getProducts(tenantId),
           db.getTeamMembers(tenantId)
       ]);
@@ -75,7 +76,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     let todayReturns = 0;
 
     const filteredShippedProducts: { [name: string]: number } = {};
-    const filteredReturnedProducts: { [name: string]: { count: number, sku: string } } = {};
+    const scannedReturnProducts: { [name: string]: { count: number, sku: string } } = {};
 
     const dailyMap: { [key: string]: any } = {};
     const productStats: { [key: string]: any } = {};
@@ -119,7 +120,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         if (createDate === today) todayOrders++;
         if (shipDate === today) todayShipped++;
         if (o.status === OrderStatus.DELIVERED && shipDate === today) todayRevenue += o.totalAmount;
-        if (o.status.includes('RETURN') && createDate === today) todayReturns++;
+        if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturns++;
+
+        // SCANNED RETURN LOGIC: Product vice count for RETURN_COMPLETED (scanned parcels)
+        if (isInRange && o.status === OrderStatus.RETURN_COMPLETED) {
+          o.items.forEach(item => {
+            if (!scannedReturnProducts[item.name]) {
+              scannedReturnProducts[item.name] = { count: 0, sku: '' };
+              const pRef = products.find(p => p.id === item.productId);
+              scannedReturnProducts[item.name].sku = pRef?.sku || 'N/A';
+            }
+            scannedReturnProducts[item.name].count += item.quantity;
+          });
+        }
 
         if (shipIsInRange) {
           o.items.forEach(item => {
@@ -127,57 +140,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           });
         }
 
-        // Logic for "Return Scan Items" Product-wise aggregation
-        if (isInRange && o.status.includes('RETURN')) {
-          o.items.forEach(item => {
-            if (!filteredReturnedProducts[item.name]) {
-              filteredReturnedProducts[item.name] = { count: 0, sku: '' };
-              const pRef = products.find(p => p.id === item.productId);
-              filteredReturnedProducts[item.name].sku = pRef?.sku || 'N/A';
-            }
-            filteredReturnedProducts[item.name].count += item.quantity;
-          });
-        }
-
         if (o.logs) {
             o.logs.forEach(log => {
                 const logDate = log.timestamp.split('T')[0];
-                if (logDate >= startDate && logDate <= endDate && teamStats[log.user]) {
+                const logInRange = logDate >= startDate && logDate <= endDate;
+                
+                if (logInRange && teamStats[log.user]) {
                     teamStats[log.user].interactions++;
                     if (log.message.includes('CONFIRMED')) teamStats[log.user].confirms++;
                     if (log.message.includes('REJECTED')) teamStats[log.user].rejects++;
                     if (log.message.includes('NO_ANSWER')) teamStats[log.user].noAnswers++;
                     if (log.message.includes('OPEN_LEAD')) teamStats[log.user].openLeads++;
                 }
+
+                // PRIMARY CONFIRM COUNT LOGIC: Track actual confirmation event within timeframe
+                if (logInRange && (log.message.includes('CONFIRMED') || log.message.includes('Order transitioned to CONFIRMED'))) {
+                    confirmedCount++;
+                }
             });
         }
 
-        if (isInRange) {
-            if (o.status === OrderStatus.CONFIRMED || o.status === OrderStatus.SHIPPED || o.status === OrderStatus.DELIVERED) {
-                confirmedCount++;
-                o.items.forEach(item => { if(productStats[item.productId]) productStats[item.productId].salesCount += item.quantity; });
-            }
-            if (o.status.includes('RETURN')) returnedCount++;
-            if (o.status === OrderStatus.RETURN_COMPLETED) restockCount++;
+        // DELIVERED STATS
+        if (shipIsInRange && o.status === OrderStatus.DELIVERED) {
+            deliveredCount++;
+            totalRevenue += o.totalAmount;
+            if (dailyMap[shipDate]) dailyMap[shipDate].sales += o.totalAmount;
+            
+            o.items.forEach(item => { 
+                if(productStats[item.productId]) {
+                    productStats[item.productId].delivered += item.quantity;
+                    productStats[item.productId].revenue += (item.price * item.quantity);
+                    const prodRef = products.find(pr => pr.id === item.productId);
+                    const avgCost = prodRef?.batches?.reduce((acc, b) => acc + b.buyingPrice, 0) / (prodRef?.batches?.length || 1) || 0;
+                    productStats[item.productId].profit += ((item.price - avgCost) * item.quantity);
+                }
+            });
         }
 
+        // SHIPPING STATS
         if (shipIsInRange) {
             shippedCount++;
             if (dailyMap[shipDate]) dailyMap[shipDate].shipped++;
-            if (o.status === OrderStatus.DELIVERED) {
-                deliveredCount++;
-                totalRevenue += o.totalAmount;
-                if (dailyMap[shipDate]) dailyMap[shipDate].sales += o.totalAmount;
-                o.items.forEach(item => { 
-                    if(productStats[item.productId]) {
-                        productStats[item.productId].delivered += item.quantity;
-                        productStats[item.productId].revenue += (item.price * item.quantity);
-                        const prodRef = products.find(pr => pr.id === item.productId);
-                        const avgCost = prodRef?.batches?.reduce((acc, b) => acc + b.buyingPrice, 0) / (prodRef?.batches?.length || 1) || 0;
-                        productStats[item.productId].profit += ((item.price - avgCost) * item.quantity);
-                    }
-                });
+        }
+
+        // SALES & RETURNS STATS (BASED ON CREATION)
+        if (isInRange) {
+            if (o.status === OrderStatus.CONFIRMED || o.status === OrderStatus.SHIPPED || o.status === OrderStatus.DELIVERED) {
+                o.items.forEach(item => { if(productStats[item.productId]) productStats[item.productId].salesCount += item.quantity; });
             }
+            if (o.status.includes('RETURN') || o.status === OrderStatus.REJECTED) {
+              returnedCount++;
+              o.items.forEach(item => { if(productStats[item.productId]) productStats[item.productId].returned += item.quantity; });
+            }
+            if (o.status === OrderStatus.RETURN_COMPLETED) restockCount++;
         }
     });
 
@@ -185,9 +200,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         stats: { deliveredCount, returnedCount, confirmedCount, shippedCount, totalRevenue, restockCount },
         today: { todayOrders, todayRevenue, todayShipped, todayReturns },
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
-        returnedManifest: Object.entries(filteredReturnedProducts).sort((a,b) => b[1].count - a[1].count),
+        scannedReturnManifest: Object.entries(scannedReturnProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
-        products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.shipped > 0),
+        products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.delivered > 0 || p.returned > 0),
         teamLeaderboard: Object.values(teamStats).sort((a,b) => b.confirms - a.confirms)
     };
   }, [orders, products, team, startDate, endDate]);
@@ -198,8 +213,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         <div className="flex items-center gap-4">
             <div className="p-3 bg-blue-600 text-white rounded-2xl shadow-lg"><LayoutDashboard size={20} /></div>
             <div>
-                <h2 className="text-xl font-black uppercase text-slate-900 leading-none">{shopName} Analytics</h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Efficiency Control Terminal</p>
+                <h2 className="text-xl font-black uppercase text-slate-900 leading-none">{shopName} Intelligence</h2>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Milky Way Data Terminal</p>
             </div>
         </div>
 
@@ -221,118 +236,108 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         </div>
       </div>
 
-      <div className="bg-slate-950 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden border border-white/5">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 blur-[150px] -translate-y-1/2 translate-x-1/2"></div>
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
-            <div className="lg:col-span-5 flex items-center gap-6">
-                <div className="w-16 h-16 bg-blue-600 rounded-[1.5rem] flex items-center justify-center shadow-2xl rotate-3">
-                    <Rocket size={32} className="text-white" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {[
+            { label: 'Delivered', val: formatFullNumber(dashboardData.stats.deliveredCount), icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', sub: 'Net Success' },
+            { label: 'Confirmed', val: formatFullNumber(dashboardData.stats.confirmedCount), icon: <Star/>, col: 'bg-blue-50 text-blue-600', sub: 'Validated Pipeline' },
+            { label: 'Shipping Count', val: formatFullNumber(dashboardData.stats.shippedCount), icon: <Truck/>, col: 'bg-indigo-50 text-indigo-600', sub: 'Total Dispatches' },
+            { label: 'Total Returns', val: formatFullNumber(dashboardData.stats.returnedCount), icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', sub: 'Failed Pipeline' },
+            { label: 'Milky Way Scanned', val: formatFullNumber(dashboardData.stats.restockCount), icon: <Archive/>, col: 'bg-amber-50 text-amber-600', sub: 'Terminal Scans' },
+            { label: 'Revenue Pool', val: formatCurrency(dashboardData.stats.totalRevenue), icon: <DollarSign/>, col: 'bg-slate-950 text-white', sub: 'Precision Balance' },
+          ].map((s, i) => (
+            <div key={i} className="p-6 rounded-[2.5rem] border border-slate-100 shadow-sm bg-white hover:border-blue-200 transition-all group relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-slate-50 rounded-full -translate-y-1/2 translate-x-1/2 opacity-50 group-hover:bg-blue-50 transition-colors"></div>
+                <div className={`w-12 h-12 ${s.col} rounded-2xl flex items-center justify-center mb-5 shadow-sm group-hover:scale-110 transition-transform relative z-10`}>
+                  {React.cloneElement(s.icon as any, { size: 22 })}
                 </div>
-                <div>
-                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none">Daily Pulse</h3>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mt-2">Live Node Status: {getLocalIsoDate()}</p>
-                </div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 relative z-10">{s.label}</p>
+                <p className="text-xl font-black text-slate-900 truncate tracking-tighter relative z-10">{s.val}</p>
+                <p className="text-[8px] font-bold text-slate-300 uppercase mt-1 tracking-widest relative z-10">{s.sub}</p>
             </div>
-            <div className="lg:col-span-7 grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                    { label: "Today's Inbound", val: dashboardData.today.todayOrders, icon: <Target className="text-blue-400" /> },
-                    { label: "Today's Dispatch", val: dashboardData.today.todayShipped, icon: <Truck className="text-amber-400" /> },
-                    { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
-                    { label: "Today's Returns", val: dashboardData.today.todayReturns, icon: <RotateCcw className="text-rose-400" /> },
-                ].map((stat, i) => (
-                    <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
-                        <div className="flex items-center gap-3 mb-2">
-                            {React.cloneElement(stat.icon as any, { size: 14 })}
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
-                        </div>
-                        <p className="text-lg font-black text-white truncate group-hover:text-blue-400 transition-colors">{stat.val}</p>
-                    </div>
-                ))}
-            </div>
-        </div>
+          ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-4 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col">
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-6">
-                <ClipboardList size={18} className="text-blue-600"/> Shipping Manifest Registry
+                <ClipboardList size={18} className="text-blue-600"/> Dispatch Manifest Registry
             </h3>
-            <div className="flex-1 space-y-3 overflow-y-auto no-scrollbar max-h-[350px]">
+            <div className="flex-1 space-y-3 overflow-y-auto no-scrollbar max-h-[400px]">
                 {dashboardData.manifest.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center py-10 opacity-30 text-center">
                     <Box size={40} className="mb-3" />
-                    <p className="text-[10px] font-black uppercase tracking-widest">No Dispatches in Range</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest">No Logged Dispatches</p>
                   </div>
                 ) : (
                   dashboardData.manifest.map(([name, count], i) => (
                     <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:bg-blue-50 transition-all">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 bg-white border border-slate-200 rounded-lg flex items-center justify-center text-[10px] font-black text-slate-900 group-hover:border-blue-200">{i+1}</div>
-                        <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight truncate max-w-[180px]">{name}</span>
+                        <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight truncate max-w-[150px]">{name}</span>
                       </div>
-                      <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[10px] font-black">×{count}</span>
+                      <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[10px] font-black">×{formatFullNumber(count)}</span>
                     </div>
                   ))
                 )}
             </div>
-            <div className="mt-4 pt-4 border-t border-slate-50">
-               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">Data relative to sample range</p>
-            </div>
         </div>
 
-        {/* NEW SECTION: Returned Stock Intelligence */}
         <div className="lg:col-span-4 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col border-t-rose-600 border-t-4">
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-6">
                 <RotateCcw size={18} className="text-rose-600"/> Returned Stock Intelligence
             </h3>
-            <div className="flex-1 space-y-3 overflow-y-auto no-scrollbar max-h-[350px]">
-                {dashboardData.returnedManifest.length === 0 ? (
+            <div className="flex-1 space-y-3 overflow-y-auto no-scrollbar max-h-[400px]">
+                {dashboardData.scannedReturnManifest.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center py-10 opacity-30 text-center">
                     <RotateCw size={40} className="mb-3" />
-                    <p className="text-[10px] font-black uppercase tracking-widest">No Returns in Registry</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest">No Scanned Parcel Returns</p>
                   </div>
                 ) : (
-                  dashboardData.returnedManifest.map(([name, data]: any, i) => (
-                    <div key={i} className="flex items-center justify-between p-4 bg-rose-50/30 rounded-2xl border border-rose-100 group hover:bg-rose-50 transition-all">
+                  dashboardData.scannedReturnManifest.map(([name, data]: any, i) => (
+                    <div key={i} className="flex items-center justify-between p-4 bg-rose-50/50 rounded-2xl border border-rose-100 group hover:bg-rose-50 transition-all">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 bg-white border border-rose-200 rounded-lg flex items-center justify-center text-[10px] font-black text-rose-600 group-hover:border-rose-400">{i+1}</div>
-                        <div className="flex flex-col overflow-hidden">
+                        <div className="flex flex-col">
                             <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight truncate max-w-[150px]">{name}</span>
                             <span className="text-[8px] font-mono text-rose-500 font-bold uppercase">{data.sku}</span>
                         </div>
                       </div>
-                      <span className="bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-rose-200">×{data.count}</span>
+                      <span className="bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-rose-200">×{formatFullNumber(data.count)}</span>
                     </div>
                   ))
                 )}
             </div>
-            <div className="mt-4 pt-4 border-t border-slate-50">
-               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">OMS Scan Terminal Data</p>
-            </div>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-4 text-center">Data filtered by terminal scan status</p>
         </div>
 
-        <div className="lg:col-span-4 grid grid-cols-2 gap-4">
-            {[
-              { label: 'Confirmed', val: dashboardData.stats.confirmedCount, icon: <Star/>, col: 'bg-emerald-50 text-emerald-600' },
-              { label: 'Shipped', val: dashboardData.stats.shippedCount, icon: <Truck/>, col: 'bg-blue-50 text-blue-600' },
-              { label: 'Delivered', val: dashboardData.stats.deliveredCount, icon: <ShieldCheck/>, col: 'bg-indigo-50 text-indigo-600' },
-              { label: 'Returns', val: dashboardData.stats.returnedCount, icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600' },
-              { label: 'Restocked', val: dashboardData.stats.restockCount, icon: <Archive/>, col: 'bg-slate-100 text-slate-500' },
-              { label: 'Revenue', val: formatCurrency(dashboardData.stats.totalRevenue), icon: <DollarSign/>, col: 'bg-slate-950 text-white' },
-            ].map((s, i) => (
-              <div key={i} className="p-6 rounded-[2rem] border border-slate-100 shadow-sm bg-white hover:border-blue-200 transition-all group cursor-default">
-                  <div className={`w-10 h-10 ${s.col} rounded-xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform`}>{React.cloneElement(s.icon as any, { size: 18 })}</div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{s.label}</p>
-                  <p className="text-xl font-black text-slate-900 truncate tracking-tighter">{s.val}</p>
-              </div>
-            ))}
+        <div className="lg:col-span-4 bg-slate-950 text-white p-8 rounded-[3rem] shadow-2xl relative overflow-hidden flex flex-col min-h-[400px]">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 blur-[100px] -translate-y-1/2 translate-x-1/2"></div>
+            <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-8 relative z-10">
+                <Target size={18} className="text-blue-400"/> Operational Velocity
+            </h3>
+            <div className="grid grid-cols-2 gap-4 relative z-10">
+              {[
+                  { label: "Today's Inbound", val: formatFullNumber(dashboardData.today.todayOrders), icon: <Target className="text-blue-400" /> },
+                  { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShipped), icon: <Truck className="text-amber-400" /> },
+                  { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
+                  { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturns), icon: <RotateCcw className="text-rose-400" /> },
+              ].map((stat, i) => (
+                  <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
+                      <div className="flex items-center gap-3 mb-2">
+                          {React.cloneElement(stat.icon as any, { size: 14 })}
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
+                      </div>
+                      <p className="text-lg font-black text-white truncate group-hover:text-blue-400 transition-colors">{stat.val}</p>
+                  </div>
+              ))}
+            </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-sm">
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-8">
-                <Activity size={18} className="text-blue-600"/> Revenue & Dispatch Trends
+                <Activity size={18} className="text-blue-600"/> Financial & Logistic Trends
             </h3>
             <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -340,7 +345,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                         <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#94a3b8'}} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#94a3b8'}} />
-                        <Tooltip />
+                        <Tooltip formatter={(v: any) => formatFullNumber(v)} />
                         <Area type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={3} fill="#10b981" fillOpacity={0.05} name="Revenue" />
                         <Area type="monotone" dataKey="shipped" stroke="#3b82f6" strokeWidth={3} fill="#3b82f6" fillOpacity={0.05} name="Dispatch" />
                     </AreaChart>
@@ -354,32 +359,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             </h3>
             <div className="space-y-4 overflow-y-auto no-scrollbar flex-1">
                 {dashboardData.teamLeaderboard.map((user, i) => (
-                    <div key={i} className="p-5 bg-white/5 rounded-[2rem] border border-white/10 flex flex-col gap-4">
+                    <div key={i} className="p-5 bg-white/5 rounded-[2.5rem] border border-white/10 flex flex-col gap-4">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-xs font-black">{user.name.slice(0, 2).toUpperCase()}</div>
                                 <div>
                                     <p className="text-xs font-black uppercase leading-none">{user.name}</p>
-                                    <p className="text-[8px] font-black text-slate-500 uppercase mt-1">{user.interactions} Interacts</p>
+                                    <p className="text-[8px] font-black text-slate-500 uppercase mt-1">{formatFullNumber(user.interactions)} Interacts</p>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-sm font-black text-emerald-400">+{user.confirms}</p>
+                                <p className="text-sm font-black text-emerald-400">+{formatFullNumber(user.confirms)}</p>
                                 <p className="text-[8px] font-black text-slate-500 uppercase">Confirmed</p>
                             </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
-                            <div className="bg-white/5 p-3 rounded-xl text-center">
-                                <p className="text-[10px] font-black">{user.openLeads}</p>
-                                <p className="text-[7px] font-black text-slate-500 uppercase">Open</p>
+                        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5">
+                            <div className="text-center">
+                                <p className="text-[8px] font-black text-rose-500 uppercase mb-1">Rejects</p>
+                                <p className="text-xs font-black text-white">{formatFullNumber(user.rejects)}</p>
                             </div>
-                            <div className="bg-white/5 p-3 rounded-xl text-center">
-                                <p className="text-[10px] font-black text-amber-500">{user.noAnswers}</p>
-                                <p className="text-[7px] font-black text-slate-500 uppercase">N/A</p>
+                            <div className="text-center">
+                                <p className="text-[8px] font-black text-amber-500 uppercase mb-1">No Ans</p>
+                                <p className="text-xs font-black text-white">{formatFullNumber(user.noAnswers)}</p>
                             </div>
-                            <div className="bg-white/5 p-3 rounded-xl text-center">
-                                <p className="text-[10px] font-black text-rose-500">{user.rejects}</p>
-                                <p className="text-[7px] font-black text-slate-500 uppercase">Reject</p>
+                            <div className="text-center">
+                                <p className="text-[8px] font-black text-blue-400 uppercase mb-1">Open</p>
+                                <p className="text-xs font-black text-white">{formatFullNumber(user.openLeads)}</p>
                             </div>
                         </div>
                     </div>
@@ -411,14 +416,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                                         <span className="text-[9px] font-mono font-bold text-blue-500 mt-1">ID: {p.sku}</span>
                                     </div>
                                 </td>
-                                <td className="text-center"><span className="text-xs font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg">+{p.salesCount}</span></td>
-                                <td className="text-center"><span className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">+{p.delivered}</span></td>
-                                <td className="text-center"><span className="text-xs font-black text-rose-600 bg-rose-50 px-3 py-1.5 rounded-lg">+{p.returned}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.salesCount)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.delivered)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-rose-600 bg-rose-50 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.returned)}</span></td>
                                 <td className="text-right pr-10">
                                     <div className="flex flex-col items-end">
                                         <span className="text-sm font-black text-slate-950">{formatCurrency(p.profit)}</span>
                                         <div className={`flex items-center gap-1 text-[8px] font-black uppercase mt-1 text-emerald-500`}>
-                                            <ArrowUpRight size={10}/> Yield Matrix
+                                            <ArrowUpRight size={10}/> Precision Matrix
                                         </div>
                                     </div>
                                 </td>
