@@ -122,7 +122,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         if (o.status === OrderStatus.DELIVERED && shipDate === today) todayRevenue += o.totalAmount;
         if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturns++;
 
-        // SCANNED RETURN LOGIC: Product vice count for RETURN_COMPLETED (scanned parcels)
+        // PRODUCT INTEL IN RANGE
+        if (isInRange) {
+          o.items.forEach(item => {
+            if (productStats[item.productId]) {
+              // Track Inbound Leads/Volume
+              productStats[item.productId].salesCount += item.quantity;
+              
+              if (o.status === OrderStatus.CONFIRMED) productStats[item.productId].confirmed += item.quantity;
+              if (o.status === OrderStatus.RETURNED || o.status === OrderStatus.RETURN_COMPLETED) productStats[item.productId].returned += item.quantity;
+            }
+          });
+        }
+
+        // SCANNED RETURN LOGIC
         if (isInRange && o.status === OrderStatus.RETURN_COMPLETED) {
           o.items.forEach(item => {
             if (!scannedReturnProducts[item.name]) {
@@ -137,6 +150,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         if (shipIsInRange) {
           o.items.forEach(item => {
             filteredShippedProducts[item.name] = (filteredShippedProducts[item.name] || 0) + item.quantity;
+            if (productStats[item.productId]) {
+              productStats[item.productId].shipped += item.quantity;
+            }
           });
         }
 
@@ -153,7 +169,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                     if (log.message.includes('OPEN_LEAD')) teamStats[log.user].openLeads++;
                 }
 
-                // PRIMARY CONFIRM COUNT LOGIC: Track actual confirmation event within timeframe
                 if (logInRange && (log.message.includes('CONFIRMED') || log.message.includes('Order transitioned to CONFIRMED'))) {
                     confirmedCount++;
                 }
@@ -183,16 +198,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             if (dailyMap[shipDate]) dailyMap[shipDate].shipped++;
         }
 
-        // SALES & RETURNS STATS (BASED ON CREATION)
+        // AGGREGATE TOTALS
         if (isInRange) {
-            if (o.status === OrderStatus.CONFIRMED || o.status === OrderStatus.SHIPPED || o.status === OrderStatus.DELIVERED) {
-                o.items.forEach(item => { if(productStats[item.productId]) productStats[item.productId].salesCount += item.quantity; });
-            }
-            if (o.status.includes('RETURN') || o.status === OrderStatus.REJECTED) {
-              returnedCount++;
-              o.items.forEach(item => { if(productStats[item.productId]) productStats[item.productId].returned += item.quantity; });
-            }
             if (o.status === OrderStatus.RETURN_COMPLETED) restockCount++;
+            if (o.status.includes('RETURN') || o.status === OrderStatus.REJECTED) returnedCount++;
         }
     });
 
@@ -202,7 +211,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
         scannedReturnManifest: Object.entries(scannedReturnProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
-        products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.delivered > 0 || p.returned > 0),
+        // Filter products that have any movement at all to ensure table populated
+        products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.delivered > 0 || p.returned > 0 || p.shipped > 0),
         teamLeaderboard: Object.values(teamStats).sort((a,b) => b.confirms - a.confirms)
     };
   }, [orders, products, team, startDate, endDate]);
@@ -397,11 +407,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                 <ListChecks size={24} className="text-emerald-500"/> Product Performance Summary
             </h3>
             <div className="overflow-x-auto no-scrollbar">
-                <table className="w-full text-left compact-table">
+                {dashboardData.products.length === 0 ? (
+                  <div className="py-20 text-center flex flex-col items-center opacity-20">
+                    <Box size={60} className="mb-4" />
+                    <p className="text-[12px] font-black uppercase tracking-[0.4em]">No Performance Data in Selected Range</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-left compact-table">
                     <thead>
                         <tr className="bg-slate-50/50">
                             <th className="rounded-l-3xl">Product SKU</th>
-                            <th className="text-center">Gross Sales</th>
+                            <th className="text-center">Total Leads</th>
+                            <th className="text-center">Confirmed</th>
                             <th className="text-center">Delivered</th>
                             <th className="text-center">Returns</th>
                             <th className="text-right rounded-r-3xl pr-10">Net Profit (Est.)</th>
@@ -416,21 +433,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                                         <span className="text-[9px] font-mono font-bold text-blue-500 mt-1">ID: {p.sku}</span>
                                     </div>
                                 </td>
-                                <td className="text-center"><span className="text-xs font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.salesCount)}</span></td>
-                                <td className="text-center"><span className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.delivered)}</span></td>
-                                <td className="text-center"><span className="text-xs font-black text-rose-600 bg-rose-50 px-3 py-1.5 rounded-lg">+{formatFullNumber(p.returned)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg">{formatFullNumber(p.salesCount)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg">{formatFullNumber(p.confirmed)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">{formatFullNumber(p.delivered)}</span></td>
+                                <td className="text-center"><span className="text-xs font-black text-rose-600 bg-rose-50 px-3 py-1.5 rounded-lg">{formatFullNumber(p.returned)}</span></td>
                                 <td className="text-right pr-10">
                                     <div className="flex flex-col items-end">
                                         <span className="text-sm font-black text-slate-950">{formatCurrency(p.profit)}</span>
                                         <div className={`flex items-center gap-1 text-[8px] font-black uppercase mt-1 text-emerald-500`}>
-                                            <ArrowUpRight size={10}/> Precision Matrix
+                                            <ArrowUpRight size={10}/> Margin Active
                                         </div>
                                     </div>
                                 </td>
                             </tr>
                         ))}
                     </tbody>
-                </table>
+                  </table>
+                )}
             </div>
         </div>
       </div>

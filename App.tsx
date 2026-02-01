@@ -113,6 +113,13 @@ export default function App() {
     }
   }, []);
 
+  const refreshTenant = useCallback(async () => {
+    if (user?.tenantId) {
+      const t = await db.getTenant(user.tenantId);
+      if (t) setTenant(t);
+    }
+  }, [user?.tenantId]);
+
   useEffect(() => {
     initBranding();
 
@@ -132,7 +139,6 @@ export default function App() {
     if (orderId && user) {
       setSelectedOrderId(orderId);
       setCurrentPage('order_detail');
-      // Clean query string to avoid infinite loops on reload
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [user]);
@@ -157,7 +163,7 @@ export default function App() {
 
   if (!user) return <LoginPage onLogin={handleLogin} branding={brandedTenant || undefined} />;
 
-  const defaultTitle = user.role === UserRole.DEV_ADMIN ? 'Master Console' : 'Milky Way';
+  const defaultTitle = user.role === UserRole.DEV_ADMIN ? 'Master Console' : 'Milky Way OMS';
   const displayShopName = tenant?.settings.shopName || brandedTenant?.settings.shopName || defaultTitle;
 
   const renderPage = () => {
@@ -174,7 +180,7 @@ export default function App() {
         case 'financials': return <FinancialCenter tenantId={user.tenantId!} shopName={displayShopName} />;
         case 'inventory': return <Stock tenantId={user.tenantId!} shopName={displayShopName} />;
         case 'returns': return <Returns tenantId={user.tenantId!} shopName={displayShopName} />;
-        case 'settings': return <Settings tenantId={user.tenantId!} shopName={displayShopName} />;
+        case 'settings': return <Settings tenantId={user.tenantId!} shopName={displayShopName} onRefreshBranding={refreshTenant} />;
         case 'team': return <Team tenantId={user.tenantId!} shopName={displayShopName} />;
         case 'dev_dashboard': return <DevAdmin />;
         case 'dev_tenants': return <DevAdmin />;

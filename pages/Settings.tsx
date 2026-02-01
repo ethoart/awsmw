@@ -12,9 +12,10 @@ import {
 interface SettingsProps {
   tenantId: string;
   shopName: string;
+  onRefreshBranding?: () => Promise<void>;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ tenantId, shopName }) => {
+export const Settings: React.FC<SettingsProps> = ({ tenantId, shopName, onRefreshBranding }) => {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [settings, setSettings] = useState<TenantSettings>({
       shopName: '', shopAddress: '', shopPhone: '', courierApiKey: '', courierApiUrl: '', 
@@ -43,6 +44,7 @@ export const Settings: React.FC<SettingsProps> = ({ tenantId, shopName }) => {
       setSaving(true);
       try {
         await db.updateTenant({ ...tenant, settings });
+        if (onRefreshBranding) await onRefreshBranding();
         alert("Branding & Cluster Settings Synchronized.");
       } finally { setSaving(false); }
   };
