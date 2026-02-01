@@ -100,18 +100,17 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`CRITICAL: Registry Wipe. Permanent removal of ${selectedIds.length} nodes. Continue?`)) return;
+    if (!confirm(`CRITICAL: Permanent Wipe of ${selectedIds.length} Nodes. Continue?`)) return;
     setBulkProcessing(true);
-    setBulkProgressMsg('INITIATING WIPE...');
+    setBulkProgressMsg('EXECUTING WIPE...');
     try {
-      // Pass tenantId explicitly in params to ensure backend picks it up
       await db.deleteOrder(selectedIds.join(','), tenantId);
       setSelectedIds([]);
       await loadData();
       if (onRefresh) onRefresh();
-      alert(`Wipe Successful: Registry sanitized.`);
+      alert(`Wipe Successful: Clusters purged.`);
     } catch (e: any) {
-      alert(`Wipe Failed: ${e.message}`);
+      alert(`Protocol Denied: ${e.message}`);
     } finally { 
       setBulkProcessing(false); 
       setBulkProgressMsg('');
@@ -119,7 +118,7 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkShip = async () => {
-    if (!confirm(`Logistics Sync: Transmit ${selectedIds.length} verified leads to Courier?`)) return;
+    if (!confirm(`Logistics Sync: Transmit ${selectedIds.length} leads to Courier?`)) return;
     setBulkProcessing(true);
     
     let successCount = 0;
@@ -127,24 +126,21 @@ export const OrderList: React.FC<OrderListProps> = ({
     let lastError = '';
 
     const targetIds = [...selectedIds];
-
     for (let i = 0; i < targetIds.length; i++) {
         const id = targetIds[i];
         const order = orders.find(o => o.id === id);
         
         if (order) {
-            setBulkProgressMsg(`SHIPPING ${i+1}/${targetIds.length}: ${order.customerName}`);
+            setBulkProgressMsg(`TRANSMITTING ${i+1}/${targetIds.length}: ${order.customerName}`);
             try {
-                // RUN INDIVIDUAL SHIP TO PREVENT BATCH ABORT ON SINGLE FAILURE
                 await db.shipOrder(order, tenantId);
                 successCount++;
             } catch (err: any) {
                 failCount++;
                 lastError = err.message;
-                console.error(`Dispatch failed for ${order.id}:`, err);
             }
-            // Cooldown to respect API throughput limits
-            await new Promise(r => setTimeout(r, 250));
+            // 500ms COOLDOWN: Crucial for legacy PHP backends like FDE
+            await new Promise(r => setTimeout(r, 500));
         }
     }
 
@@ -152,9 +148,9 @@ export const OrderList: React.FC<OrderListProps> = ({
     setBulkProgressMsg('');
     
     if (failCount > 0) {
-        alert(`Bulk Dispatch Result:\n- SUCCESS: ${successCount}\n- FAILED: ${failCount}\n\nLast Error: ${lastError}`);
+        alert(`Bulk Dispatch Summary:\n- SUCCESS: ${successCount}\n- FAILED: ${failCount}\n\nLast FDE Error: ${lastError}`);
     } else {
-        alert(`Logistics Protocol Success: ${successCount} Waybills generated.`);
+        alert(`Logistics Success: ${successCount} Waybills generated.`);
     }
     
     setSelectedIds([]);
@@ -216,7 +212,7 @@ export const OrderList: React.FC<OrderListProps> = ({
         <div className="relative flex-1 md:w-80">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input 
-              placeholder="Server-Side Search (Reference, Phone, Name)..." 
+              placeholder="Registry Search..." 
               value={search} 
               onChange={(e) => setSearch(e.target.value)} 
               className="w-full bg-white border border-slate-200 pl-11 pr-4 py-3 rounded-2xl outline-none text-[13px] font-bold focus:ring-2 focus:ring-blue-500 shadow-sm" 
@@ -224,26 +220,12 @@ export const OrderList: React.FC<OrderListProps> = ({
         </div>
         <div className="flex items-center gap-4">
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Total: {totalCount.toLocaleString()} Leads
+              Total: {totalCount.toLocaleString()} Nodes
             </div>
             <div className="flex items-center gap-1">
-               <button 
-                disabled={currentPage === 1 || isLoading} 
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                className="p-2 rounded-lg hover:bg-slate-200 disabled:opacity-30"
-               >
-                 <ChevronLeft size={16}/>
-               </button>
-               <span className="text-[11px] font-black text-slate-900 bg-white border border-slate-200 px-3 py-1 rounded-lg">
-                 Page {currentPage} of {totalPages || 1}
-               </span>
-               <button 
-                disabled={currentPage === totalPages || totalPages === 0 || isLoading} 
-                onClick={() => setCurrentPage(p => p + 1)}
-                className="p-2 rounded-lg hover:bg-slate-200 disabled:opacity-30"
-               >
-                 <ChevronRight size={16}/>
-               </button>
+               <button disabled={currentPage === 1 || isLoading} onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="p-2 rounded-lg hover:bg-slate-200 disabled:opacity-30"><ChevronLeft size={16}/></button>
+               <span className="text-[11px] font-black text-slate-900 bg-white border border-slate-200 px-3 py-1 rounded-lg">Page {currentPage} of {totalPages || 1}</span>
+               <button disabled={currentPage === totalPages || totalPages === 0 || isLoading} onClick={() => setCurrentPage(p => p + 1)} className="p-2 rounded-lg hover:bg-slate-200 disabled:opacity-30"><ChevronRight size={16}/></button>
             </div>
         </div>
       </div>
@@ -267,17 +249,12 @@ export const OrderList: React.FC<OrderListProps> = ({
           </thead>
           <tbody className={`divide-y divide-slate-100 ${isLoading ? 'opacity-50' : ''}`}>
             {orders.length === 0 && !isLoading && (
-              <tr>
-                <td colSpan={7} className="py-20 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest">
-                   No Records Found in Cluster Registry
-                </td>
-              </tr>
+              <tr><td colSpan={7} className="py-20 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest">No Records Found</td></tr>
             )}
             {orders.map((order) => {
               const last8 = order.customerPhone.slice(-8);
               const history = customerHistories[last8];
               const isSelected = selectedIds.includes(order.id);
-              
               return (
                 <tr key={order.id} className={`hover:bg-slate-50 transition-colors cursor-pointer group ${isSelected ? 'bg-blue-50/50' : ''}`} onClick={(e) => handleOrderClick(e, order.id)}>
                   <td onClick={(e) => { e.stopPropagation(); setSelectedIds(prev => prev.includes(order.id) ? prev.filter(x => x !== order.id) : [...prev, order.id]); }} className="text-center">
@@ -295,21 +272,15 @@ export const OrderList: React.FC<OrderListProps> = ({
                   <td className="text-center">
                       <div className="flex flex-col gap-1 items-center">
                         {history?.returns > 0 ? (
-                          <div className="bg-rose-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase">
-                            RISK ({history.returns})
-                          </div>
+                          <div className="bg-rose-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase">RISK ({history.returns})</div>
                         ) : history?.count >= 2 ? (
-                          <div className="bg-blue-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase">
-                            REPEAT ({history.count})
-                          </div>
+                          <div className="bg-blue-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase">REPEAT ({history.count})</div>
                         ) : <span className="text-[10px] font-bold text-slate-300">-</span>}
                       </div>
                   </td>
                   <td><span className="text-sm font-black text-slate-900">{formatCurrency(order.totalAmount)}</span></td>
                   <td className="text-center">
-                    <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${getStatusColor(order.status)}`}>
-                      {order.status.replace('_', ' ')}
-                    </span>
+                    <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${getStatusColor(order.status)}`}>{order.status.replace('_', ' ')}</span>
                   </td>
                   <td className="text-right pr-6">
                     <div className="flex items-center justify-end gap-2">
@@ -325,24 +296,10 @@ export const OrderList: React.FC<OrderListProps> = ({
       </div>
       
       <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-            Showing {orders.length} of {totalCount.toLocaleString()} results
-          </div>
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Showing {orders.length} of {totalCount.toLocaleString()} results</div>
           <div className="flex items-center gap-2">
-            <button 
-              disabled={currentPage === 1 || isLoading} 
-              onClick={() => setCurrentPage(1)}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase hover:bg-slate-200 disabled:opacity-30"
-            >
-              First
-            </button>
-            <button 
-              disabled={currentPage === totalPages || totalPages === 0 || isLoading} 
-              onClick={() => setCurrentPage(totalPages)}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase hover:bg-slate-200 disabled:opacity-30"
-            >
-              Last
-            </button>
+            <button disabled={currentPage === 1 || isLoading} onClick={() => setCurrentPage(1)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase hover:bg-slate-200 disabled:opacity-30">First</button>
+            <button disabled={currentPage === totalPages || totalPages === 0 || isLoading} onClick={() => setCurrentPage(totalPages)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase hover:bg-slate-200 disabled:opacity-30">Last</button>
           </div>
       </div>
     </div>

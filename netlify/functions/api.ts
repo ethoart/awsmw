@@ -23,6 +23,23 @@ async function getConnectedClient(uri: string) {
   return client;
 }
 
+const FDE_ERRORS: Record<number, string> = {
+  201: "Inactive Client",
+  202: "Invalid Order ID",
+  203: "Invalid Weight",
+  204: "Invalid Parcel Description",
+  205: "Invalid Name",
+  206: "Contact Number 1 Invalid",
+  207: "Contact Number 2 Invalid",
+  208: "Invalid Address",
+  209: "Invalid City Name",
+  210: "Insert Failed, Try Again",
+  211: "Invalid API Key",
+  212: "Invalid or Inactive Client",
+  213: "Invalid Exchange Value",
+  214: "Courier Maintenance Mode"
+};
+
 export const handler: Handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
   const headers = {
@@ -48,15 +65,11 @@ export const handler: Handler = async (event, context) => {
 
     if (path === '/health') return { statusCode: 200, headers, body: JSON.stringify({ status: 'connected' }) };
 
-    // SAFE BODY PARSING
     let bodyData: any = {};
     if (event.body && (method === 'POST' || method === 'PUT')) {
-        try { bodyData = JSON.parse(event.body); } catch(e) {
-          // If not JSON, try to handle as URL encoded if necessary, but frontend sends JSON
-        }
+        try { bodyData = JSON.parse(event.body); } catch(e) {}
     }
 
-    // MANDATORY: Extract tenant context early
     const tenantId = event.queryStringParameters?.tenantId || bodyData.tenantId;
     let activeDb = centralDb;
     let tenantSettings: any = null;
@@ -108,9 +121,7 @@ export const handler: Handler = async (event, context) => {
     }
 
     if (path === '/users') {
-      if (method === 'GET') {
-        return { statusCode: 200, headers, body: JSON.stringify(await usersCol.find({ tenantId }).toArray()) };
-      }
+      if (method === 'GET') return { statusCode: 200, headers, body: JSON.stringify(await usersCol.find({ tenantId }).toArray()) };
       if (method === 'POST') {
         const user = bodyData;
         await usersCol.updateOne({ id: user.id }, { $set: user }, { upsert: true });
@@ -178,8 +189,7 @@ export const handler: Handler = async (event, context) => {
       }
       if (method === 'DELETE') {
         const { id, purge } = event.queryStringParameters || {};
-        if (!tenantId) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Tenant context missing.' }) };
-
+        if (!tenantId) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Context Required' }) };
         if (purge === 'true') {
           const result = await ordersCol.deleteMany({ tenantId });
           return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
@@ -189,7 +199,7 @@ export const handler: Handler = async (event, context) => {
           const result = await ordersCol.deleteMany({ id: { $in: ids }, tenantId });
           return { statusCode: 200, headers, body: JSON.stringify({ success: true, count: result.deletedCount }) };
         }
-        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing deletion target.' }) };
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing Target' }) };
       }
     }
 
@@ -211,22 +221,25 @@ export const handler: Handler = async (event, context) => {
     if (path === '/ship-order' && method === 'POST') {
         const { order } = bodyData;
         const ordersCol = activeDb.collection('orders');
-        if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Courier configuration missing." }) };
+        if (!tenantSettings?.courierApiKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing Keys" }) };
 
-        const cleanAmount = Math.round(order.totalAmount).toString();
         const formData = new URLSearchParams();
         formData.append('api_key', tenantSettings.courierApiKey.trim());
         formData.append('client_id', tenantSettings.courierClientId.trim());
-        formData.append('order_id', order.id.replace(/\D/g, '').slice(-10));
+        formData.append('order_id', order.id.toString());
+        formData.append('parcel_weight', order.parcelWeight || '1');
+        formData.append('parcel_description', order.parcelDescription || order.items[0]?.name || 'Standard Shipment');
         formData.append('recipient_name', order.customerName);
         formData.append('recipient_contact_1', order.customerPhone.replace(/\D/g, ''));
+        formData.append('recipient_contact_2', (order.customerPhone2 || '').replace(/\D/g, ''));
         formData.append('recipient_address', order.customerAddress);
         formData.append('recipient_city', order.customerCity || 'Colombo');
-        formData.append('amount', cleanAmount);
+        formData.append('amount', Math.round(order.totalAmount).toString());
+        formData.append('exchange', '0');
 
         const targetUrl = tenantSettings.courierMode === 'EXISTING_WAYBILL' 
           ? 'https://www.fdedomestic.com/api/parcel/existing_waybill_api_v1.php'
-          : (tenantSettings.courierApiUrl || 'https://www.fdedomestic.com/api/parcel/new_api_v1.php');
+          : 'https://www.fdedomestic.com/api/parcel/new_api_v1.php';
 
         if (tenantSettings.courierMode === 'EXISTING_WAYBILL') {
             formData.append('waybill_id', (order.trackingNumber || '').toString());
@@ -238,27 +251,29 @@ export const handler: Handler = async (event, context) => {
             body: formData 
         });
         
+        const rawText = await response.text();
         let data: any;
-        const rawResponse = await response.text();
         try {
-            data = JSON.parse(rawResponse);
+            data = JSON.parse(rawText);
         } catch(e) {
-            // IF RESPONSE IS NOT JSON: Return the raw response string as the error
-            return { statusCode: 400, headers, body: JSON.stringify({ error: `Logistics Error: ${rawResponse.slice(0, 150)}` }) };
+            return { statusCode: 400, headers, body: JSON.stringify({ error: `FDE Bridge Failure: ${rawText.slice(0, 100)}` }) };
         }
 
-        if (data && Number(data.status) === 200) {
+        const status = Number(data.status);
+        if (status === 200) {
             const updated = { 
                 ...order, 
                 status: 'SHIPPED', 
                 trackingNumber: data.waybill_no || order.trackingNumber, 
                 shippedAt: new Date().toISOString(),
-                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'Logistics Handshake: Successful Waybill Assigned', timestamp: new Date().toISOString(), user: 'OMS Connector' }]
+                logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'FDE Handshake: Success', timestamp: new Date().toISOString(), user: 'OMS Connector' }]
             };
             await ordersCol.updateOne({ id: order.id }, { $set: updated });
             return { statusCode: 200, headers, body: JSON.stringify(updated) };
         }
-        return { statusCode: 400, headers, body: JSON.stringify({ error: data?.message || 'Handshake failed: Status not 200' }) };
+        
+        const errorMsg = FDE_ERRORS[status] || `FDE Error ${status}: Handshake Refused`;
+        return { statusCode: 400, headers, body: JSON.stringify({ error: errorMsg }) };
     }
 
     if (path === '/process-return' && method === 'POST') {
@@ -270,15 +285,7 @@ export const handler: Handler = async (event, context) => {
             await ordersCol.updateOne({ id: order.id }, { $set: updated });
             return { statusCode: 200, headers, body: JSON.stringify(updated) };
         }
-        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Reference ID not matched.' }) };
-    }
-
-    if (path === '/customer-history-detailed' && method === 'GET') {
-        const { phone } = event.queryStringParameters || {};
-        if (!phone) return { statusCode: 200, headers, body: JSON.stringify([]) };
-        const last8 = phone.slice(-8);
-        const all = await activeDb.collection('orders').find({ customerPhone: { $regex: last8 + "$" } }).sort({ createdAt: -1 }).toArray();
-        return { statusCode: 200, headers, body: JSON.stringify(all) };
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Not Found' }) };
     }
 
     if (path === '/customer-history' && method === 'GET') {
@@ -293,7 +300,7 @@ export const handler: Handler = async (event, context) => {
         return { statusCode: 200, headers, body: JSON.stringify({ count, returns }) };
     }
 
-    return { statusCode: 404, headers, body: JSON.stringify({ error: 'Path not found' }) };
+    return { statusCode: 404, headers, body: JSON.stringify({ error: 'Not Found' }) };
   } catch (error: any) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: error.message }) };
   }
