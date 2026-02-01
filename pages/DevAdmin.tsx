@@ -85,6 +85,18 @@ export const DevAdmin: React.FC = () => {
     return OrderStatus.PENDING;
   };
 
+  const parseSafeDate = (dateStr: string): string => {
+    if (!dateStr) return new Date().toISOString();
+    // Replace space with T for standard ISO parsing if it's "YYYY-MM-DD HH:mm:ss"
+    const normalized = dateStr.trim().replace(' ', 'T');
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) {
+      // Fallback for non-standard formats, try to return current time to avoid crash
+      return new Date().toISOString();
+    }
+    return d.toISOString();
+  };
+
   const handleMigration = async () => {
     if (!migrationTenantId) return alert("Select target cluster node.");
     if (!migrationFile) return alert("Upload legacy payload file (CSV).");
@@ -93,71 +105,71 @@ export const DevAdmin: React.FC = () => {
     const reader = new FileReader();
     
     reader.onload = async (e) => {
-      const text = e.target?.result as string;
-      const lines = text.split('\n');
-      const headers = lines[0].split(',').map(h => h.trim());
-      
-      const findIdx = (names: string[]) => headers.findIndex(h => names.some(n => h.toLowerCase() === n.toLowerCase()));
-
-      const idx = {
-        id: findIdx(['Lead Num', 'id']),
-        tracking: findIdx(['Waybill ID', 'tracking']),
-        name: findIdx(['Customer Name', 'name']),
-        phone: findIdx(['Phone Number', 'phone']),
-        phone2: findIdx(['Contact 2']),
-        address: findIdx(['Address']),
-        city: findIdx(['City']),
-        product: findIdx(['Product']),
-        qty: findIdx(['Quantity']),
-        price: findIdx(['Price']),
-        total: findIdx(['Total Value', 'total']),
-        status: findIdx(['Status']),
-        date: findIdx(['Order Date', 'created']),
-        shipped: findIdx(['Shipped At']),
-        stockId: findIdx(['Stock Item ID'])
-      };
-
-      const orders: Order[] = [];
-      setMigrationLog(`Parsing ${lines.length - 1} legacy records...`);
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        
-        const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
-        const cleanVal = (val: string) => (val || '').replace(/^"|"$/g, '').trim();
-
-        const phone = cleanVal(parts[idx.phone]).replace('p:', '').replace(/\s/g, '');
-        
-        const legacyOrder: Order = {
-          id: cleanVal(parts[idx.id]) || `mig-${Date.now()}-${i}`,
-          tenantId: migrationTenantId,
-          customerName: cleanVal(parts[idx.name]),
-          customerPhone: phone,
-          customerPhone2: cleanVal(parts[idx.phone2]),
-          customerAddress: cleanVal(parts[idx.address]),
-          customerCity: cleanVal(parts[idx.city]),
-          items: [{
-            productId: cleanVal(parts[idx.stockId]) || 'legacy-sku',
-            name: cleanVal(parts[idx.product]),
-            price: parseFloat(cleanVal(parts[idx.price])) || 0,
-            quantity: parseInt(cleanVal(parts[idx.qty])) || 1
-          }],
-          totalAmount: parseFloat(cleanVal(parts[idx.total])) || 0,
-          status: mapLegacyStatus(cleanVal(parts[idx.status])),
-          trackingNumber: cleanVal(parts[idx.tracking]),
-          createdAt: new Date(cleanVal(parts[idx.date])).toISOString() || new Date().toISOString(),
-          shippedAt: parts[idx.shipped] ? new Date(cleanVal(parts[idx.shipped])).toISOString() : undefined,
-          isPrinted: true,
-          logs: [{ id: `l-${Date.now()}`, message: 'Legacy Data Migration Handshake', timestamp: new Date().toISOString(), user: 'DEV_ADMIN' }]
-        };
-        orders.push(legacyOrder);
-      }
-
-      setMigrationProgress('SYNCING');
-      setMigrationLog(`Pushing ${orders.length} orders to cluster [${migrationTenantId}]...`);
-      
       try {
+        const text = e.target?.result as string;
+        const lines = text.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim());
+        
+        const findIdx = (names: string[]) => headers.findIndex(h => names.some(n => h.toLowerCase() === n.toLowerCase()));
+
+        const idx = {
+          id: findIdx(['Lead Num', 'id']),
+          tracking: findIdx(['Waybill ID', 'tracking']),
+          name: findIdx(['Customer Name', 'name']),
+          phone: findIdx(['Phone Number', 'phone']),
+          phone2: findIdx(['Contact 2']),
+          address: findIdx(['Address']),
+          city: findIdx(['City']),
+          product: findIdx(['Product']),
+          qty: findIdx(['Quantity']),
+          price: findIdx(['Price']),
+          total: findIdx(['Total Value', 'total']),
+          status: findIdx(['Status']),
+          date: findIdx(['Order Date', 'created']),
+          shipped: findIdx(['Shipped At']),
+          stockId: findIdx(['Stock Item ID'])
+        };
+
+        const orders: Order[] = [];
+        setMigrationLog(`Parsing ${lines.length - 1} legacy records...`);
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+          const cleanVal = (val: string) => (val || '').replace(/^"|"$/g, '').trim();
+
+          const phone = cleanVal(parts[idx.phone]).replace('p:', '').replace(/\s/g, '');
+          
+          const legacyOrder: Order = {
+            id: cleanVal(parts[idx.id]) || `mig-${Date.now()}-${i}`,
+            tenantId: migrationTenantId,
+            customerName: cleanVal(parts[idx.name]),
+            customerPhone: phone,
+            customerPhone2: cleanVal(parts[idx.phone2]),
+            customerAddress: cleanVal(parts[idx.address]),
+            customerCity: cleanVal(parts[idx.city]),
+            items: [{
+              productId: cleanVal(parts[idx.stockId]) || 'legacy-sku',
+              name: cleanVal(parts[idx.product]),
+              price: parseFloat(cleanVal(parts[idx.price])) || 0,
+              quantity: parseInt(cleanVal(parts[idx.qty])) || 1
+            }],
+            totalAmount: parseFloat(cleanVal(parts[idx.total])) || 0,
+            status: mapLegacyStatus(cleanVal(parts[idx.status])),
+            trackingNumber: cleanVal(parts[idx.tracking]),
+            createdAt: parseSafeDate(cleanVal(parts[idx.date])),
+            shippedAt: parts[idx.shipped] && cleanVal(parts[idx.shipped]) ? parseSafeDate(cleanVal(parts[idx.shipped])) : undefined,
+            isPrinted: true,
+            logs: [{ id: `l-${Date.now()}`, message: 'Legacy Data Migration Handshake', timestamp: new Date().toISOString(), user: 'DEV_ADMIN' }]
+          };
+          orders.push(legacyOrder);
+        }
+
+        setMigrationProgress('SYNCING');
+        setMigrationLog(`Pushing ${orders.length} orders to cluster [${migrationTenantId}]...`);
+        
         const chunkSize = 100;
         for (let i = 0; i < orders.length; i += chunkSize) {
           const chunk = orders.slice(i, i + chunkSize);
@@ -170,6 +182,11 @@ export const DevAdmin: React.FC = () => {
         setMigrationProgress('ERROR');
         setMigrationLog(`Handshake Failure: ${err.message}`);
       }
+    };
+
+    reader.onerror = () => {
+      setMigrationProgress('ERROR');
+      setMigrationLog(`File Access Failure.`);
     };
 
     reader.readAsText(migrationFile);
