@@ -7,7 +7,7 @@ import {
   RefreshCcw, DollarSign, Truck, RotateCcw, 
   Archive, Users, Calendar, ShoppingBag, Star, Activity, Box,
   Award, ListChecks, ArrowUpRight, LayoutDashboard,
-  ShieldCheck, Target, Rocket, ClipboardList, RotateCw, History as HistoryIcon
+  ShieldCheck, Target, Rocket, ClipboardList, RotateCw, History as HistoryIcon, PackageCheck
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, 
@@ -127,7 +127,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           });
         }
 
-        // Logic for "Return Scan Items" Product-wise aggregation
         if (isInRange && o.status.includes('RETURN')) {
           o.items.forEach(item => {
             if (!filteredReturnedProducts[item.name]) {
@@ -221,35 +220,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         </div>
       </div>
 
-      <div className="bg-slate-950 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden border border-white/5">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 blur-[150px] -translate-y-1/2 translate-x-1/2"></div>
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
-            <div className="lg:col-span-5 flex items-center gap-6">
-                <div className="w-16 h-16 bg-blue-600 rounded-[1.5rem] flex items-center justify-center shadow-2xl rotate-3">
-                    <Rocket size={32} className="text-white" />
+      {/* TOP KEY METRICS SECTION */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {[
+            { label: 'Delivery Count', val: dashboardData.stats.deliveredCount, icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', sub: 'Completed' },
+            { label: 'Confirm Count', val: dashboardData.stats.confirmedCount, icon: <Star/>, col: 'bg-blue-50 text-blue-600', sub: 'Pipeline' },
+            { label: 'Return Count', val: dashboardData.stats.returnedCount, icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', sub: 'Logistics' },
+            { label: 'Restock Count', val: dashboardData.stats.restockCount, icon: <Archive/>, col: 'bg-amber-50 text-amber-600', sub: 'Inventory' },
+            { label: 'Revenue Pool', val: formatCurrency(dashboardData.stats.totalRevenue), icon: <DollarSign/>, col: 'bg-slate-950 text-white', sub: 'Net Settled' },
+          ].map((s, i) => (
+            <div key={i} className="p-6 rounded-[2.5rem] border border-slate-100 shadow-sm bg-white hover:border-blue-200 transition-all group relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-slate-50 rounded-full -translate-y-1/2 translate-x-1/2 opacity-50 group-hover:bg-blue-50 transition-colors"></div>
+                <div className={`w-12 h-12 ${s.col} rounded-2xl flex items-center justify-center mb-5 shadow-sm group-hover:scale-110 transition-transform relative z-10`}>
+                  {React.cloneElement(s.icon as any, { size: 22 })}
                 </div>
-                <div>
-                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none">Daily Pulse</h3>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mt-2">Live Node Status: {getLocalIsoDate()}</p>
-                </div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 relative z-10">{s.label}</p>
+                <p className="text-2xl font-black text-slate-900 truncate tracking-tighter relative z-10">{s.val}</p>
+                <p className="text-[8px] font-bold text-slate-300 uppercase mt-1 tracking-widest relative z-10">{s.sub}</p>
             </div>
-            <div className="lg:col-span-7 grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                    { label: "Today's Inbound", val: dashboardData.today.todayOrders, icon: <Target className="text-blue-400" /> },
-                    { label: "Today's Dispatch", val: dashboardData.today.todayShipped, icon: <Truck className="text-amber-400" /> },
-                    { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
-                    { label: "Today's Returns", val: dashboardData.today.todayReturns, icon: <RotateCcw className="text-rose-400" /> },
-                ].map((stat, i) => (
-                    <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
-                        <div className="flex items-center gap-3 mb-2">
-                            {React.cloneElement(stat.icon as any, { size: 14 })}
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
-                        </div>
-                        <p className="text-lg font-black text-white truncate group-hover:text-blue-400 transition-colors">{stat.val}</p>
-                    </div>
-                ))}
-            </div>
-        </div>
+          ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -280,7 +269,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             </div>
         </div>
 
-        {/* NEW SECTION: Returned Stock Intelligence */}
         <div className="lg:col-span-4 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col border-t-rose-600 border-t-4">
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-6">
                 <RotateCcw size={18} className="text-rose-600"/> Returned Stock Intelligence
@@ -311,21 +299,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             </div>
         </div>
 
-        <div className="lg:col-span-4 grid grid-cols-2 gap-4">
-            {[
-              { label: 'Confirmed', val: dashboardData.stats.confirmedCount, icon: <Star/>, col: 'bg-emerald-50 text-emerald-600' },
-              { label: 'Shipped', val: dashboardData.stats.shippedCount, icon: <Truck/>, col: 'bg-blue-50 text-blue-600' },
-              { label: 'Delivered', val: dashboardData.stats.deliveredCount, icon: <ShieldCheck/>, col: 'bg-indigo-50 text-indigo-600' },
-              { label: 'Returns', val: dashboardData.stats.returnedCount, icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600' },
-              { label: 'Restocked', val: dashboardData.stats.restockCount, icon: <Archive/>, col: 'bg-slate-100 text-slate-500' },
-              { label: 'Revenue', val: formatCurrency(dashboardData.stats.totalRevenue), icon: <DollarSign/>, col: 'bg-slate-950 text-white' },
-            ].map((s, i) => (
-              <div key={i} className="p-6 rounded-[2rem] border border-slate-100 shadow-sm bg-white hover:border-blue-200 transition-all group cursor-default">
-                  <div className={`w-10 h-10 ${s.col} rounded-xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform`}>{React.cloneElement(s.icon as any, { size: 18 })}</div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{s.label}</p>
-                  <p className="text-xl font-black text-slate-900 truncate tracking-tighter">{s.val}</p>
-              </div>
-            ))}
+        <div className="lg:col-span-4 bg-slate-950 text-white p-8 rounded-[3rem] shadow-2xl relative overflow-hidden flex flex-col min-h-[400px]">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 blur-[100px] -translate-y-1/2 translate-x-1/2"></div>
+            <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-8 relative z-10">
+                <Target size={18} className="text-blue-400"/> Operational Velocity
+            </h3>
+            <div className="grid grid-cols-2 gap-4 relative z-10">
+              {[
+                  { label: "Today's Inbound", val: dashboardData.today.todayOrders, icon: <Target className="text-blue-400" /> },
+                  { label: "Today's Dispatch", val: dashboardData.today.todayShipped, icon: <Truck className="text-amber-400" /> },
+                  { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
+                  { label: "Today's Returns", val: dashboardData.today.todayReturns, icon: <RotateCcw className="text-rose-400" /> },
+              ].map((stat, i) => (
+                  <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
+                      <div className="flex items-center gap-3 mb-2">
+                          {React.cloneElement(stat.icon as any, { size: 14 })}
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
+                      </div>
+                      <p className="text-lg font-black text-white truncate group-hover:text-blue-400 transition-colors">{stat.val}</p>
+                  </div>
+              ))}
+            </div>
+            <div className="mt-auto pt-8 relative z-10">
+               <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.4em]">Milky Way Live Node Heartbeat</p>
+            </div>
         </div>
       </div>
 
