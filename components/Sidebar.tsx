@@ -105,7 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, shopName, logoUrl, activ
           )}
           <div className="flex flex-col">
             <h1 className="text-[15px] font-black text-slate-900 tracking-tight uppercase leading-none truncate max-w-[140px]">
-              Milky Way OMS
+              {shopName || 'Milky Way OMS'}
             </h1>
             <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">Enterprise Hub</span>
           </div>

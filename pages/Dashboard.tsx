@@ -126,9 +126,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         if (isInRange) {
           o.items.forEach(item => {
             if (productStats[item.productId]) {
-              // Track Inbound Leads/Volume
               productStats[item.productId].salesCount += item.quantity;
-              
               if (o.status === OrderStatus.CONFIRMED) productStats[item.productId].confirmed += item.quantity;
               if (o.status === OrderStatus.RETURNED || o.status === OrderStatus.RETURN_COMPLETED) productStats[item.productId].returned += item.quantity;
             }
@@ -211,8 +209,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
         scannedReturnManifest: Object.entries(scannedReturnProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
-        // Filter products that have any movement at all to ensure table populated
-        products: Object.values(productStats).filter((p:any) => p.salesCount > 0 || p.delivered > 0 || p.returned > 0 || p.shipped > 0),
+        // SHOW ALL PRODUCTS in summary to ensure table is never empty for a tenant
+        products: Object.values(productStats),
         teamLeaderboard: Object.values(teamStats).sort((a,b) => b.confirms - a.confirms)
     };
   }, [orders, products, team, startDate, endDate]);
@@ -410,7 +408,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                 {dashboardData.products.length === 0 ? (
                   <div className="py-20 text-center flex flex-col items-center opacity-20">
                     <Box size={60} className="mb-4" />
-                    <p className="text-[12px] font-black uppercase tracking-[0.4em]">No Performance Data in Selected Range</p>
+                    <p className="text-[12px] font-black uppercase tracking-[0.4em]">No Products in Catalog</p>
                   </div>
                 ) : (
                   <table className="w-full text-left compact-table">
@@ -440,8 +438,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                                 <td className="text-right pr-10">
                                     <div className="flex flex-col items-end">
                                         <span className="text-sm font-black text-slate-950">{formatCurrency(p.profit)}</span>
-                                        <div className={`flex items-center gap-1 text-[8px] font-black uppercase mt-1 text-emerald-500`}>
-                                            <ArrowUpRight size={10}/> Margin Active
+                                        <div className={`flex items-center gap-1 text-[8px] font-black uppercase mt-1 ${p.profit > 0 ? 'text-emerald-500' : 'text-slate-400'}`}>
+                                            <ArrowUpRight size={10}/> Margin Status
                                         </div>
                                     </div>
                                 </td>
