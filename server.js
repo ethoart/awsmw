@@ -150,7 +150,6 @@ app.get('/api/orders', async (req, res) => {
 
         const query = { tenantId };
         
-        // Advanced status filtering
         if (status && status !== 'ALL') {
             if (status === 'TODAY_SHIPPED') {
                 const dateToMatch = startDate || new Date().toISOString().split('T')[0];
@@ -343,12 +342,26 @@ app.get('/api/tenants', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/tenants', async (req, res) => {
+app.all('/api/tenants', async (req, res) => {
+    if (req.method !== 'POST' && req.method !== 'PUT') return res.status(405).end();
     try {
         const db = await connectCentral();
         const { tenant, adminUser } = req.body;
-        await db.collection('tenants').updateOne({ id: tenant.id }, { $set: clean(tenant) }, { upsert: true });
-        if (adminUser) await db.collection('users').updateOne({ tenantId: tenant.id, role: 'SUPER_ADMIN' }, { $set: clean(adminUser) }, { upsert: true });
+        if (!tenant || !tenant.id) return res.status(400).json({ error: 'Invalid tenant payload' });
+        
+        await db.collection('tenants').updateOne(
+            { id: tenant.id }, 
+            { $set: clean(tenant) }, 
+            { upsert: true }
+        );
+        
+        if (adminUser) {
+            await db.collection('users').updateOne(
+                { tenantId: tenant.id, role: 'SUPER_ADMIN' }, 
+                { $set: clean(adminUser) }, 
+                { upsert: true }
+            );
+        }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });

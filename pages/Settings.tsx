@@ -28,24 +28,36 @@ export const Settings: React.FC<SettingsProps> = ({ tenantId, shopName, onRefres
   const [syncStatus, setSyncStatus] = useState<'IDLE' | 'SUCCESS' | 'ERROR'>( 'IDLE' );
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    db.getTenant(tenantId).then(t => {
-        if (t) {
-            setTenant(t);
-            setSettings({ ...t.settings, 
-                courierApiUrl: t.settings.courierApiUrl || 'https://www.fdedomestic.com/api/parcel/new_api_v1.php' 
-            });
-        }
-    });
-  }, [tenantId]);
+  const loadTenant = async () => {
+    const t = await db.getTenant(tenantId);
+    if (t) {
+        setTenant(t);
+        setSettings({ ...t.settings, 
+            courierApiUrl: t.settings.courierApiUrl || 'https://www.fdedomestic.com/api/parcel/new_api_v1.php' 
+        });
+    }
+  };
+
+  useEffect(() => { loadTenant(); }, [tenantId]);
 
   const handleSave = async () => {
       if (!tenant) return;
       setSaving(true);
       try {
-        await db.updateTenant({ ...tenant, settings });
+        // MERGE: Construct complete tenant object with latest settings state
+        const updatedTenant: Tenant = {
+            ...tenant,
+            settings: { ...settings }
+        };
+        await db.updateTenant(updatedTenant);
+        
+        // SYNC: Trigger global app refresh and reload local data
         if (onRefreshBranding) await onRefreshBranding();
-        alert("Branding & Cluster Settings Synchronized.");
+        await loadTenant();
+        
+        alert("Cluster Sync Successful: Courier API and Branding updated.");
+      } catch (err: any) {
+        alert("Sync Failure: " + err.message);
       } finally { setSaving(false); }
   };
 
