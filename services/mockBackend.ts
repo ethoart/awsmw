@@ -122,6 +122,43 @@ class BackendService {
     await this.request('/products', 'DELETE', null, { id: productId, tenantId });
   }
 
+  /**
+   * FIFO STOCK REDUCTION LOGIC
+   * Automatically iterates through batches from oldest to newest
+   */
+  async deductStockFIFO(tenantId: string, productId: string, quantityToDeduct: number): Promise<void> {
+    const products = await this.getProducts(tenantId);
+    const product = products.find(p => p.id === productId);
+    
+    if (!product) throw new Error("Product not found in registry.");
+    
+    let remainingToDeduct = quantityToDeduct;
+    const updatedBatches = [...(product.batches || [])].sort((a, b) => 
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+
+    for (let i = 0; i < updatedBatches.length; i++) {
+        if (remainingToDeduct <= 0) break;
+        
+        const batch = updatedBatches[i];
+        if (batch.quantity >= remainingToDeduct) {
+            batch.quantity -= remainingToDeduct;
+            remainingToDeduct = 0;
+        } else {
+            remainingToDeduct -= batch.quantity;
+            batch.quantity = 0;
+        }
+    }
+
+    // Filter out completely consumed batches to keep DB lean
+    const finalBatches = updatedBatches.filter(b => b.quantity > 0);
+    
+    await this.updateProduct({
+        ...product,
+        batches: finalBatches
+    });
+  }
+
   async getTenants(): Promise<Tenant[]> {
     return this.request('/tenants', 'GET');
   }

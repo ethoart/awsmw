@@ -149,21 +149,25 @@ app.get('/api/orders', async (req, res) => {
         }
 
         const query = { tenantId };
+        
+        // Advanced status filtering
         if (status && status !== 'ALL') {
             if (status === 'TODAY_SHIPPED') {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                query.shippedAt = { $gte: today.toISOString() };
+                const dateToMatch = startDate || new Date().toISOString().split('T')[0];
+                query.shippedAt = { $regex: `^${dateToMatch}` };
             } else {
                 query.status = status;
             }
         }
+
         if (productId) query['items.productId'] = productId;
-        if (startDate || endDate) {
+        
+        if (!query.shippedAt && (startDate || endDate)) {
             query.createdAt = {};
             if (startDate) query.createdAt.$gte = startDate;
             if (endDate) query.createdAt.$lte = endDate + 'T23:59:59';
         }
+
         if (search) {
             query.$or = [
                 { id: { $regex: search, $options: 'i' } },
@@ -274,8 +278,6 @@ app.post('/api/ship-order', async (req, res) => {
         
         if (!settings || !settings.courierApiKey) return res.status(400).json({ error: "Keys Missing" });
 
-        // SANITIZATION: FDE often requires numeric Order ID for their internal logic
-        // Extracting only digits from our system ID to satisfy status 202 check
         const fdeOrderId = order.id.replace(/\D/g, '').slice(-10) || Math.floor(Math.random() * 1000000000).toString();
 
         const formData = new URLSearchParams();
@@ -365,6 +367,15 @@ app.post('/api/products', async (req, res) => {
         const { product } = req.body;
         const db = await getTenantDb(tenantId);
         await db.collection('products').updateOne({ id: product.id }, { $set: { ...clean(product), tenantId } }, { upsert: true });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/products', async (req, res) => {
+    try {
+        const { id, tenantId } = req.query;
+        const db = await getTenantDb(tenantId);
+        await db.collection('products').deleteOne({ id, tenantId });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });

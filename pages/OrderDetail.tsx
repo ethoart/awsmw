@@ -116,10 +116,31 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
 
   const totalAmount = useMemo(() => items.reduce((sum, item) => sum + (item.price * item.quantity), 0), [items]);
 
+  const handleInventoryReduction = async () => {
+    try {
+        const reductionPromises = items.map(item => 
+            db.deductStockFIFO(tenantId, item.productId, item.quantity)
+        );
+        await Promise.all(reductionPromises);
+        console.log(">>> Inventory Protocol: Batch Reduction Successful.");
+    } catch (err) {
+        console.error(">>> Inventory Failure:", err);
+    }
+  };
+
   const updateStatus = async (newStatus: OrderStatus) => {
     if (!order) return;
     const user = localStorage.getItem('mw_user') ? JSON.parse(localStorage.getItem('mw_user')!).username : 'System';
     
+    // ACTION: Reduce stock upon confirmation or direct ship if not done yet
+    const needsStockReduction = (newStatus === OrderStatus.CONFIRMED || newStatus === OrderStatus.SHIPPED) && 
+                               order.status !== OrderStatus.CONFIRMED && 
+                               order.status !== OrderStatus.SHIPPED;
+
+    if (needsStockReduction) {
+        await handleInventoryReduction();
+    }
+
     if (newStatus === OrderStatus.SHIPPED) {
       if (tenant?.settings.courierMode === CourierMode.EXISTING_WAYBILL && !localFormData.trackingNumber) return alert("Waybill ID required.");
       setShippingLoading(true);
@@ -316,7 +337,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
             </div>
 
             <div className="space-y-8">
-                {/* Customer Nexus (Intel History) - NOW AT TOP OF SIDEBAR */}
+                {/* Customer Nexus (Intel History) */}
                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
                     <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><HistoryIcon size={16} className="text-blue-600"/> Customer Intelligence Nexus</h3>
                     <div className="space-y-4">

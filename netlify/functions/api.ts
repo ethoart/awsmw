@@ -134,6 +134,21 @@ export const handler: Handler = async (event, context) => {
       }
     }
 
+    if (path === '/products') {
+      const prodCol = activeDb.collection('products');
+      if (method === 'GET') return { statusCode: 200, headers, body: JSON.stringify(await prodCol.find({ tenantId }).toArray()) };
+      if (method === 'POST') {
+        const { product } = bodyData;
+        await prodCol.updateOne({ id: product.id }, { $set: { ...product, tenantId } }, { upsert: true });
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+      }
+      if (method === 'DELETE') {
+        const id = event.queryStringParameters?.id;
+        await prodCol.deleteOne({ id, tenantId });
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+      }
+    }
+
     if (path === '/orders') {
       const ordersCol = activeDb.collection('orders');
       if (method === 'GET') {
