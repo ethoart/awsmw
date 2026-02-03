@@ -132,7 +132,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     if (!order) return;
     const user = localStorage.getItem('mw_user') ? JSON.parse(localStorage.getItem('mw_user')!).username : 'System';
     
-    // ACTION: Reduce stock upon confirmation or direct ship if not done yet
     const needsStockReduction = (newStatus === OrderStatus.CONFIRMED || newStatus === OrderStatus.SHIPPED) && 
                                order.status !== OrderStatus.CONFIRMED && 
                                order.status !== OrderStatus.SHIPPED;
@@ -163,6 +162,14 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     } else {
         loadData();
     }
+  };
+
+  const openWhatsApp = (phoneNum: string) => {
+    if (!phoneNum) return;
+    const cleanPhone = phoneNum.replace(/\D/g, '');
+    const formattedPhone = cleanPhone.startsWith('0') ? '94' + cleanPhone.slice(1) : cleanPhone;
+    const msg = `Hi ${localFormData.customerName}, this is from ${tenant?.settings.shopName || 'Milky Way'}. Regarding your order #${orderId.slice(-6).toUpperCase()}, the status is currently ${order?.status}.`;
+    window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const handleItemChange = (idx: number, field: string, val: any) => {
@@ -233,7 +240,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
-                {/* Protocol Control */}
                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
                     <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><Activity size={16} className="text-blue-600"/> Handshake Protocol</h3>
                     <div className="flex flex-wrap gap-3">
@@ -262,7 +268,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                     </div>
                 </div>
 
-                {/* Recipient Intelligence */}
                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
                     <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><UserIcon size={16} className="text-blue-600"/> Recipient Mapping</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -272,13 +277,23 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                         </div>
                         <div className="space-y-1.5">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Primary Contact</label>
-                            <input className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 font-bold outline-none focus:ring-2 focus:ring-blue-600" value={localFormData.customerPhone} onChange={e => setLocalFormData({...localFormData, customerPhone: e.target.value})} />
+                            <div className="flex gap-2">
+                                <input className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 font-bold outline-none focus:ring-2 focus:ring-blue-600" value={localFormData.customerPhone} onChange={e => setLocalFormData({...localFormData, customerPhone: e.target.value})} />
+                                <button onClick={() => openWhatsApp(localFormData.customerPhone)} className="p-3.5 bg-emerald-500 text-white rounded-2xl hover:bg-emerald-600 transition-all shadow-lg flex items-center justify-center shrink-0">
+                                    <MessageSquare size={18} />
+                                </button>
+                            </div>
                         </div>
                         <div className="space-y-1.5">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Alt Contact</label>
-                            <div className="relative">
-                                <input className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 pl-12 font-bold outline-none focus:ring-2 focus:ring-blue-600" value={localFormData.customerPhone2} onChange={e => setLocalFormData({...localFormData, customerPhone2: e.target.value})} />
-                                <Phone size={16} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <input className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 pl-12 font-bold outline-none focus:ring-2 focus:ring-blue-600" value={localFormData.customerPhone2} onChange={e => setLocalFormData({...localFormData, customerPhone2: e.target.value})} />
+                                    <Phone size={16} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                </div>
+                                <button onClick={() => openWhatsApp(localFormData.customerPhone2 || '')} className="p-3.5 bg-emerald-500 text-white rounded-2xl hover:bg-emerald-600 transition-all shadow-lg flex items-center justify-center shrink-0">
+                                    <MessageSquare size={18} />
+                                </button>
                             </div>
                         </div>
                         <div className="space-y-1.5 relative" ref={cityDropdownRef}>
@@ -300,7 +315,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                     </div>
                 </div>
 
-                {/* Order Payload Editor (Price/Items) */}
                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
                     <div className="flex items-center justify-between">
                         <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><Package size={16} className="text-blue-600"/> Order Payload</h3>
@@ -337,7 +351,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
             </div>
 
             <div className="space-y-8">
-                {/* Customer Nexus (Intel History) */}
                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
                     <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><HistoryIcon size={16} className="text-blue-600"/> Customer Intelligence Nexus</h3>
                     <div className="space-y-4">
@@ -371,7 +384,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                     </div>
                 </div>
 
-                {/* Finance Monitor */}
                 <div className="bg-slate-950 text-white p-10 rounded-[3rem] shadow-2xl relative border border-white/5 overflow-hidden">
                     <div className="absolute top-0 right-0 w-48 h-48 bg-blue-600/10 blur-[100px] -translate-y-1/2 translate-x-1/2"></div>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-2 relative z-10">Total Amount</p>
@@ -382,7 +394,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                     </div>
                 </div>
 
-                {/* Logistics Intel */}
                 {isShipped && order.trackingNumber && (
                     <div className="bg-blue-600 text-white p-10 rounded-[3rem] shadow-2xl space-y-4">
                         <div className="flex items-center gap-2 opacity-60">
@@ -394,7 +405,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                     </div>
                 )}
 
-                {/* System Registry Log */}
                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
                     <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><History size={16} className="text-blue-600"/> Audit Registry</h3>
                     <div className="space-y-4 max-h-[450px] overflow-y-auto no-scrollbar">

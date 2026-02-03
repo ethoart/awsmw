@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Order, OrderStatus, Product, User } from '../types';
 import { db } from '../services/mockBackend';
-import { formatCurrency, formatFullNumber } from '../utils/helpers';
+import { formatCurrency, formatFullNumber, getSLDateString } from '../utils/helpers';
 import { 
   RefreshCcw, DollarSign, Truck, RotateCcw, 
   Archive, Users, Calendar, ShoppingBag, Star, Activity, Box,
@@ -26,20 +26,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
   const [team, setTeam] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const getLocalIsoDate = (date: Date = new Date()) => date.toISOString().split('T')[0];
   const [preset, setPreset] = useState<'TODAY' | 'WEEK' | 'MONTH' | 'YEAR'>('MONTH');
   const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState(getLocalIsoDate());
+  const [endDate, setEndDate] = useState(getSLDateString());
 
   const applyPreset = useCallback((p: 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR') => {
     setPreset(p);
     const d = new Date();
-    if (p === 'TODAY') d.setHours(0,0,0,0);
-    else if (p === 'WEEK') d.setDate(d.getDate() - 7);
+    if (p === 'TODAY') {
+        // Just use current SL date
+    } else if (p === 'WEEK') d.setDate(d.getDate() - 7);
     else if (p === 'MONTH') d.setMonth(d.getMonth() - 1);
     else if (p === 'YEAR') d.setFullYear(d.getFullYear() - 1);
-    setStartDate(getLocalIsoDate(d));
-    setEndDate(getLocalIsoDate(new Date()));
+    
+    setStartDate(getSLDateString(d));
+    setEndDate(getSLDateString(new Date()));
   }, []);
 
   useEffect(() => { applyPreset('MONTH'); }, [applyPreset]);
@@ -69,7 +70,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     let totalRevenue = 0;
     let restockCount = 0;
 
-    const today = getLocalIsoDate();
+    const today = getSLDateString();
     let todayOrders = 0;
     let todayRevenue = 0;
     let todayShipped = 0;
@@ -108,12 +109,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     const dStart = new Date(startDate || today);
     const dEnd = new Date(endDate || today);
     for (let d = new Date(dStart); d <= dEnd; d.setDate(d.getDate() + 1)) {
-        dailyMap[getLocalIsoDate(d)] = { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), sales: 0, shipped: 0 };
+        const slDate = getSLDateString(d);
+        dailyMap[slDate] = { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), sales: 0, shipped: 0 };
     }
 
     (orders || []).forEach(o => {
-        const createDate = o.createdAt.split('T')[0];
-        const shipDate = o.shippedAt?.split('T')[0];
+        const createDate = getSLDateString(new Date(o.createdAt));
+        const shipDate = o.shippedAt ? getSLDateString(new Date(o.shippedAt)) : null;
         const isInRange = createDate >= startDate && createDate <= endDate;
         const shipIsInRange = shipDate && shipDate >= startDate && shipDate <= endDate;
         
@@ -122,7 +124,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         if (o.status === OrderStatus.DELIVERED && shipDate === today) todayRevenue += o.totalAmount;
         if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturns++;
 
-        // PRODUCT INTEL IN RANGE
         if (isInRange) {
           o.items.forEach(item => {
             if (productStats[item.productId]) {
@@ -133,7 +134,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           });
         }
 
-        // SCANNED RETURN LOGIC
         if (isInRange && o.status === OrderStatus.RETURN_COMPLETED) {
           o.items.forEach(item => {
             if (!scannedReturnProducts[item.name]) {
@@ -156,7 +156,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
 
         if (o.logs) {
             o.logs.forEach(log => {
-                const logDate = log.timestamp.split('T')[0];
+                const logDate = getSLDateString(new Date(log.timestamp));
                 const logInRange = logDate >= startDate && logDate <= endDate;
                 
                 if (logInRange && teamStats[log.user]) {
@@ -173,7 +173,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             });
         }
 
-        // DELIVERED STATS
         if (shipIsInRange && o.status === OrderStatus.DELIVERED) {
             deliveredCount++;
             totalRevenue += o.totalAmount;
@@ -190,13 +189,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             });
         }
 
-        // SHIPPING STATS
         if (shipIsInRange) {
             shippedCount++;
             if (dailyMap[shipDate]) dailyMap[shipDate].shipped++;
         }
 
-        // AGGREGATE TOTALS
         if (isInRange) {
             if (o.status === OrderStatus.RETURN_COMPLETED) restockCount++;
             if (o.status.includes('RETURN') || o.status === OrderStatus.REJECTED) returnedCount++;
@@ -209,7 +206,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
         scannedReturnManifest: Object.entries(scannedReturnProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
-        // SHOW ALL PRODUCTS in summary to ensure table is never empty for a tenant
         products: Object.values(productStats),
         teamLeaderboard: Object.values(teamStats).sort((a,b) => b.confirms - a.confirms)
     };

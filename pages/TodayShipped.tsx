@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { db } from '../services/mockBackend';
 import { Order, TenantSettings } from '../types';
-import { formatCurrency } from '../utils/helpers';
+import { formatCurrency, getSLDateString } from '../utils/helpers';
 import { Printer, CalendarCheck, Search, Download, Calendar, Package, RefreshCw } from 'lucide-react';
 import { LabelPrintView } from '../components/LabelPrintView';
 
@@ -17,18 +17,17 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
   const [tenantSettings, setTenantSettings] = useState<TenantSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [targetDate, setTargetDate] = useState(new Date().toISOString().split('T')[0]);
+  const [targetDate, setTargetDate] = useState(getSLDateString());
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-        // Fetch orders specifically with TODAY_SHIPPED logic for the selected date
         const [fetchedOrders, fetchedTenant] = await Promise.all([
             db.getOrders({ 
                 tenantId, 
                 status: 'TODAY_SHIPPED', 
                 startDate: targetDate, 
-                limit: 1000 // Get all daily shipments
+                limit: 1000 
             }),
             db.getTenant(tenantId)
         ]);
