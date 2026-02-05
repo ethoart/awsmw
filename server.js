@@ -17,9 +17,11 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const CENTRAL_DB_NAME = 'milkyway_central';
 
 app.use(cors());
-// Increase limit for base64 images
+// Standard Parsers
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Fallback Parser: Capture anything else (like text/plain or missing content-type) as string
+app.use(express.text({ type: '*/*', limit: '50mb' }));
 
 let centralClient;
 let centralDb;
@@ -310,7 +312,6 @@ app.post('/api/process-return', async (req, res) => {
 
 // Courier Webhook Endpoint (Reverse API)
 app.post('/api/courier-webhook', async (req, res) => {
-    // Add CORS to satisfy PHP requirements/testing
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST');
     
@@ -318,10 +319,13 @@ app.post('/api/courier-webhook', async (req, res) => {
         let body = req.body || {};
         
         // --- ROBUST BODY PARSING START ---
-        // 1. Handle JSON sent as string (e.g. text/plain content type)
+        // Handle when body is a string (text/plain or missing content-type)
         if (typeof body === 'string') {
-            try { body = JSON.parse(body); } catch (e) {
-                // If not JSON, try to parse as query string
+            try { 
+                // Attempt JSON first
+                body = JSON.parse(body); 
+            } catch (e) {
+                // If not JSON, try to parse as query string (x-www-form-urlencoded format manually)
                 const params = new URLSearchParams(body);
                 if (params.has('waybill_id')) {
                     body = Object.fromEntries(params);
@@ -329,8 +333,7 @@ app.post('/api/courier-webhook', async (req, res) => {
             }
         }
 
-        // 2. Handle curl -d '{ "json": "val" }' where header is x-www-form-urlencoded
-        // This results in body being: { '{ "json": "val" }': '' }
+        // Handle Curl/JSON-as-key Edge Case: { '{"json":"val"}': '' }
         if (!body.waybill_id && !body.waybillId && typeof body === 'object') {
             const keys = Object.keys(body);
             if (keys.length === 1 && keys[0].trim().startsWith('{')) {
@@ -343,7 +346,7 @@ app.post('/api/courier-webhook', async (req, res) => {
             }
         }
 
-        // 3. Fallback to query params if body is completely empty
+        // Fallback to query params if body is still empty
         if ((!body || Object.keys(body).length === 0) && req.query) {
             body = req.query;
         }
@@ -353,7 +356,7 @@ app.post('/api/courier-webhook', async (req, res) => {
         const statusRaw = body.delivery_status || body.current_status || body.status;
         const lastUpdate = body.last_update_time || new Date().toISOString();
 
-        console.log(">>> Reverse API Hit:", { waybill_id, statusRaw });
+        console.log(">>> Reverse API Hit:", { waybill_id, statusRaw, contentType: req.headers['content-type'] });
 
         if (!waybill_id) {
             return res.status(400).json({ 
@@ -372,32 +375,48 @@ app.post('/api/courier-webhook', async (req, res) => {
 async function handleWebhookUpdate(waybill_id, statusRaw, lastUpdate, res) {
     const central = await connectCentral();
     const tenants = await central.collection('tenants').find({ isActive: true }).toArray();
+    let found = false;
+
+    // Normalize waybill for search (trim whitespace)
+    const cleanWaybill = String(waybill_id).trim();
 
     for (const tenant of tenants) {
         try {
             const db = await getTenantDb(tenant.id);
-            const order = await db.collection('orders').findOne({ trackingNumber: waybill_id });
+            // Search using regex to be case insensitive and robust
+            const order = await db.collection('orders').findOne({ 
+                trackingNumber: { $regex: `^${cleanWaybill}$`, $options: 'i' } 
+            });
+            
             if (order) {
+                found = true;
                 const newStatus = mapStatus(statusRaw);
-                await db.collection('orders').updateOne(
-                    { id: order.id },
-                    {
-                        $set: { status: newStatus, courierStatus: statusRaw },
-                        $push: { logs: {
-                            id: `l-${Date.now()}`,
-                            message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`,
-                            timestamp: new Date().toISOString(),
-                            user: 'Courier System'
-                        }}
-                    }
-                );
+                
+                // Only update if status is actually different to avoid log spam
+                if (order.status !== newStatus) {
+                    await db.collection('orders').updateOne(
+                        { id: order.id },
+                        {
+                            $set: { status: newStatus, courierStatus: statusRaw },
+                            $push: { logs: {
+                                id: `l-${Date.now()}`,
+                                message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`,
+                                timestamp: new Date().toISOString(),
+                                user: 'Courier System'
+                            }}
+                        }
+                    );
+                }
                 return res.status(200).send('Success');
             }
         } catch (err) {
             console.error(`Tenant ${tenant.id} scan failed:`, err);
         }
     }
-    res.status(404).send('Waybill not found in any registry');
+    
+    if (!found) {
+        res.status(404).send('Waybill not found in any registry');
+    }
 }
 
 app.post('/api/ship-order', async (req, res) => {
@@ -453,10 +472,11 @@ app.post('/api/ship-order', async (req, res) => {
 
         const status = Number(data.status);
         if (status === 200) {
+            const newWaybill = data.waybill_no ? String(data.waybill_no).trim() : (order.trackingNumber || '').trim();
             const updated = { 
                 ...order, 
                 status: 'SHIPPED', 
-                trackingNumber: data.waybill_no || order.trackingNumber, 
+                trackingNumber: newWaybill, 
                 shippedAt: new Date().toISOString(),
                 logs: [...(order.logs || []), { id: `l-${Date.now()}`, message: 'FDE Handshake: Success', timestamp: new Date().toISOString(), user: 'OMS Connector' }]
             };
