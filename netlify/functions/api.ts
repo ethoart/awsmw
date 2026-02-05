@@ -40,6 +40,19 @@ const FDE_ERRORS: Record<number, string> = {
   214: "Courier Maintenance Mode"
 };
 
+const mapStatus = (courierStatus: string) => {
+    const s = (courierStatus || '').toLowerCase();
+    if (s.includes('delivered')) return 'DELIVERED';
+    if (s.includes('returned')) return 'RETURNED';
+    if (s.includes('handover')) return 'RETURN_HANDOVER';
+    if (s.includes('transfer')) return 'RETURN_TRANSFER';
+    if (s.includes('system')) return 'RETURN_AS_ON_SYSTEM';
+    if (s.includes('delivery')) return 'DELIVERY';
+    if (s.includes('residual')) return 'RESIDUAL';
+    if (s.includes('rearrange')) return 'REARRANGE';
+    return 'SHIPPED'; 
+};
+
 export const handler: Handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
   const headers = {
@@ -83,6 +96,45 @@ export const handler: Handler = async (event, context) => {
           activeDb = tenantClient.db();
         }
       }
+    }
+
+    if (path === '/courier-webhook' && method === 'POST') {
+        let payload = bodyData;
+        
+        // Handle URL encoded bodies if not parsed
+        if (Object.keys(payload).length === 0 && event.body) {
+             const params = new URLSearchParams(event.body);
+             params.forEach((value, key) => { payload[key] = value; });
+        }
+
+        const waybill_id = payload.waybill_id || payload.waybillId || event.queryStringParameters?.waybill_id;
+        const statusRaw = payload.delivery_status || payload.current_status || payload.status || event.queryStringParameters?.delivery_status;
+
+        if (!waybill_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Bad Request: waybill_id missing' }) };
+
+        const allTenants = await tenantsCol.find({ isActive: true }).toArray();
+        for (const t of allTenants) {
+            try {
+                let db = centralDb;
+                if (t.mongoUri) {
+                    const client = await getConnectedClient(t.mongoUri);
+                    db = client.db();
+                }
+                const order = await db.collection('orders').findOne({ trackingNumber: waybill_id });
+                if (order) {
+                    const newStatus = mapStatus(statusRaw);
+                    await db.collection('orders').updateOne(
+                        { id: order.id },
+                        {
+                            $set: { status: newStatus, courierStatus: statusRaw },
+                            $push: { logs: { id: `l-${Date.now()}`, message: `WEBHOOK: Status update to ${statusRaw}`, timestamp: new Date().toISOString(), user: 'Courier System' }}
+                        }
+                    );
+                    return { statusCode: 200, headers, body: 'Success' };
+                }
+            } catch (e) { console.error(e); }
+        }
+        return { statusCode: 404, headers, body: 'Waybill not found' };
     }
 
     if (path === '/login' && method === 'POST') {
@@ -239,7 +291,7 @@ export const handler: Handler = async (event, context) => {
         if (phone2) formData.append('recipient_contact_2', phone2);
 
         formData.append('recipient_address', order.customerAddress);
-        formData.append('recipient_city', order.customerCity || 'Colombo');
+        formData.append('recipient_city', order.customerCity || '');
         formData.append('amount', Math.round(order.totalAmount).toString());
         formData.append('exchange', '0');
 

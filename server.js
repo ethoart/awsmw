@@ -311,41 +311,61 @@ app.post('/api/process-return', async (req, res) => {
 // Courier Webhook Endpoint
 app.post('/api/courier-webhook', async (req, res) => {
     try {
-        const { waybill_id, delivery_status } = req.body;
-        if (!waybill_id) return res.status(400).send('Bad Request: waybill_id missing');
-
-        const central = await connectCentral();
-        const tenants = await central.collection('tenants').find({ isActive: true }).toArray();
-
-        for (const tenant of tenants) {
-            try {
-                const db = await getTenantDb(tenant.id);
-                const order = await db.collection('orders').findOne({ trackingNumber: waybill_id });
-                if (order) {
-                    const newStatus = mapStatus(delivery_status);
-                    await db.collection('orders').updateOne(
-                        { id: order.id },
-                        {
-                            $set: { status: newStatus, courierStatus: delivery_status },
-                            $push: { logs: {
-                                id: `l-${Date.now()}`,
-                                message: `WEBHOOK: Status update to ${delivery_status}`,
-                                timestamp: new Date().toISOString(),
-                                user: 'Courier System'
-                            }}
-                        }
-                    );
-                    return res.status(200).send('Success');
-                }
-            } catch (err) {
-                console.error(`Tenant ${tenant.id} scan failed:`, err);
-            }
+        let body = req.body;
+        
+        // Robustness: Parse string body if JSON header missing
+        if (typeof body === 'string') {
+            try { body = JSON.parse(body); } catch (e) {}
         }
-        res.status(404).send('Waybill not found in any registry');
+
+        // Support various field naming conventions
+        const waybill_id = body.waybill_id || body.waybillId;
+        const statusRaw = body.delivery_status || body.current_status || body.status;
+
+        if (!waybill_id) {
+            // Check query params as last resort
+            if (req.query.waybill_id) {
+                return await handleWebhookUpdate(req.query.waybill_id, req.query.delivery_status || req.query.current_status, res);
+            }
+            return res.status(400).send('Bad Request: waybill_id missing');
+        }
+
+        await handleWebhookUpdate(waybill_id, statusRaw, res);
     } catch (e) {
         res.status(500).send(e.message);
     }
 });
+
+async function handleWebhookUpdate(waybill_id, statusRaw, res) {
+    const central = await connectCentral();
+    const tenants = await central.collection('tenants').find({ isActive: true }).toArray();
+
+    for (const tenant of tenants) {
+        try {
+            const db = await getTenantDb(tenant.id);
+            const order = await db.collection('orders').findOne({ trackingNumber: waybill_id });
+            if (order) {
+                const newStatus = mapStatus(statusRaw);
+                await db.collection('orders').updateOne(
+                    { id: order.id },
+                    {
+                        $set: { status: newStatus, courierStatus: statusRaw },
+                        $push: { logs: {
+                            id: `l-${Date.now()}`,
+                            message: `WEBHOOK: Status update to ${statusRaw}`,
+                            timestamp: new Date().toISOString(),
+                            user: 'Courier System'
+                        }}
+                    }
+                );
+                return res.status(200).send('Success');
+            }
+        } catch (err) {
+            console.error(`Tenant ${tenant.id} scan failed:`, err);
+        }
+    }
+    res.status(404).send('Waybill not found in any registry');
+}
 
 app.post('/api/ship-order', async (req, res) => {
     try {
