@@ -50,6 +50,7 @@ const mapStatus = (courierStatus: string) => {
     if (s.includes('delivery')) return 'DELIVERY';
     if (s.includes('residual')) return 'RESIDUAL';
     if (s.includes('rearrange')) return 'REARRANGE';
+    if (s.includes('waiting')) return 'PENDING';
     return 'SHIPPED'; 
 };
 
@@ -101,16 +102,28 @@ export const handler: Handler = async (event, context) => {
     if (path === '/courier-webhook' && method === 'POST') {
         let payload = bodyData;
         
-        // Handle URL encoded bodies if not parsed
+        // Robust Fallback 1: Parse Form URL Encoded manually if JSON parse failed or body is empty but raw body exists
         if (Object.keys(payload).length === 0 && event.body) {
              const params = new URLSearchParams(event.body);
-             params.forEach((value, key) => { payload[key] = value; });
+             if (params.has('waybill_id')) {
+                 params.forEach((value, key) => { payload[key] = value; });
+             }
         }
 
+        // Robust Fallback 2: Check for JSON-in-key edge case
+        if (!payload.waybill_id && !payload.waybillId && Object.keys(payload).length === 1) {
+             try {
+                 const potentialJson = JSON.parse(Object.keys(payload)[0]);
+                 if (potentialJson.waybill_id || potentialJson.waybillId) payload = potentialJson;
+             } catch(e) {}
+        }
+
+        // Robust Fallback 3: Query Params
         const waybill_id = payload.waybill_id || payload.waybillId || event.queryStringParameters?.waybill_id;
         const statusRaw = payload.delivery_status || payload.current_status || payload.status || event.queryStringParameters?.delivery_status;
+        const lastUpdate = payload.last_update_time || new Date().toISOString();
 
-        if (!waybill_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Bad Request: waybill_id missing' }) };
+        if (!waybill_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Bad Request: waybill_id missing', receivedPayload: payload }) };
 
         const allTenants = await tenantsCol.find({ isActive: true }).toArray();
         for (const t of allTenants) {
@@ -127,7 +140,7 @@ export const handler: Handler = async (event, context) => {
                         { id: order.id },
                         {
                             $set: { status: newStatus, courierStatus: statusRaw },
-                            $push: { logs: { id: `l-${Date.now()}`, message: `WEBHOOK: Status update to ${statusRaw}`, timestamp: new Date().toISOString(), user: 'Courier System' }}
+                            $push: { logs: { id: `l-${Date.now()}`, message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`, timestamp: new Date().toISOString(), user: 'Courier System' }}
                         }
                     );
                     return { statusCode: 200, headers, body: 'Success' };

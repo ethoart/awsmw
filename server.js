@@ -17,8 +17,9 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const CENTRAL_DB_NAME = 'milkyway_central';
 
 app.use(cors());
+// Increase limit for base64 images
 app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 let centralClient;
 let centralDb;
@@ -85,6 +86,7 @@ const mapStatus = (courierStatus) => {
     if (s.includes('delivery')) return 'DELIVERY';
     if (s.includes('residual')) return 'RESIDUAL';
     if (s.includes('rearrange')) return 'REARRANGE';
+    if (s.includes('waiting')) return 'PENDING';
     return 'SHIPPED'; 
 };
 
@@ -274,17 +276,15 @@ app.post('/api/process-return', async (req, res) => {
         const order = await ordersCol.findOne({ $or: [{ id: trackingOrId }, { trackingNumber: trackingOrId }] });
         
         if (order) {
-            // INVENTORY SYNC: Add items back to stock
             if (order.status !== 'RETURN_COMPLETED') {
                 for (const item of order.items) {
                     const product = await prodCol.findOne({ id: item.productId });
                     if (product) {
-                        // Re-inject into the newest batch or create a 'Return' batch
                         const batches = product.batches || [];
                         const returnBatch = {
                             id: `rb-${Date.now()}`,
                             quantity: item.quantity,
-                            buyingPrice: item.price * 0.7, // Estimate or original cost if available
+                            buyingPrice: item.price * 0.7,
                             createdAt: new Date().toISOString(),
                             isReturn: true
                         };
@@ -308,35 +308,68 @@ app.post('/api/process-return', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Courier Webhook Endpoint
+// Courier Webhook Endpoint (Reverse API)
 app.post('/api/courier-webhook', async (req, res) => {
+    // Add CORS to satisfy PHP requirements/testing
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST');
+    
     try {
-        let body = req.body;
+        let body = req.body || {};
         
-        // Robustness: Parse string body if JSON header missing
+        // --- ROBUST BODY PARSING START ---
+        // 1. Handle JSON sent as string (e.g. text/plain content type)
         if (typeof body === 'string') {
-            try { body = JSON.parse(body); } catch (e) {}
+            try { body = JSON.parse(body); } catch (e) {
+                // If not JSON, try to parse as query string
+                const params = new URLSearchParams(body);
+                if (params.has('waybill_id')) {
+                    body = Object.fromEntries(params);
+                }
+            }
         }
 
-        // Support various field naming conventions
+        // 2. Handle curl -d '{ "json": "val" }' where header is x-www-form-urlencoded
+        // This results in body being: { '{ "json": "val" }': '' }
+        if (!body.waybill_id && !body.waybillId && typeof body === 'object') {
+            const keys = Object.keys(body);
+            if (keys.length === 1 && keys[0].trim().startsWith('{')) {
+                try {
+                    const parsedKey = JSON.parse(keys[0]);
+                    if (parsedKey.waybill_id || parsedKey.waybillId) {
+                        body = parsedKey;
+                    }
+                } catch(e) {}
+            }
+        }
+
+        // 3. Fallback to query params if body is completely empty
+        if ((!body || Object.keys(body).length === 0) && req.query) {
+            body = req.query;
+        }
+        // --- ROBUST BODY PARSING END ---
+
         const waybill_id = body.waybill_id || body.waybillId;
         const statusRaw = body.delivery_status || body.current_status || body.status;
+        const lastUpdate = body.last_update_time || new Date().toISOString();
+
+        console.log(">>> Reverse API Hit:", { waybill_id, statusRaw });
 
         if (!waybill_id) {
-            // Check query params as last resort
-            if (req.query.waybill_id) {
-                return await handleWebhookUpdate(req.query.waybill_id, req.query.delivery_status || req.query.current_status, res);
-            }
-            return res.status(400).send('Bad Request: waybill_id missing');
+            return res.status(400).json({ 
+                error: 'Bad Request: waybill_id missing', 
+                receivedBody: body 
+            });
         }
 
-        await handleWebhookUpdate(waybill_id, statusRaw, res);
+        await handleWebhookUpdate(waybill_id, statusRaw, lastUpdate, res);
     } catch (e) {
+        console.error("Webhook Error:", e);
         res.status(500).send(e.message);
     }
 });
 
-async function handleWebhookUpdate(waybill_id, statusRaw, res) {
+async function handleWebhookUpdate(waybill_id, statusRaw, lastUpdate, res) {
     const central = await connectCentral();
     const tenants = await central.collection('tenants').find({ isActive: true }).toArray();
 
@@ -352,7 +385,7 @@ async function handleWebhookUpdate(waybill_id, statusRaw, res) {
                         $set: { status: newStatus, courierStatus: statusRaw },
                         $push: { logs: {
                             id: `l-${Date.now()}`,
-                            message: `WEBHOOK: Status update to ${statusRaw}`,
+                            message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`,
                             timestamp: new Date().toISOString(),
                             user: 'Courier System'
                         }}
@@ -392,7 +425,6 @@ app.post('/api/ship-order', async (req, res) => {
         if (phone2) formData.append('recipient_contact_2', phone2);
 
         formData.append('recipient_address', order.customerAddress.toString());
-        // Removed default 'Colombo' fallback. If missing, send empty string.
         formData.append('recipient_city', (order.customerCity || '').toString());
         formData.append('amount', Math.round(order.totalAmount).toString());
         formData.append('exchange', '0');
