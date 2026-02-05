@@ -256,10 +256,38 @@ app.post('/api/process-return', async (req, res) => {
         const { trackingOrId, tenantId } = req.body;
         const db = await getTenantDb(tenantId);
         const ordersCol = db.collection('orders');
+        const prodCol = db.collection('products');
+        
         const order = await ordersCol.findOne({ $or: [{ id: trackingOrId }, { trackingNumber: trackingOrId }] });
         
         if (order) {
-            const updated = { ...order, status: 'RETURN_COMPLETED' };
+            // INVENTORY SYNC: Add items back to stock
+            if (order.status !== 'RETURN_COMPLETED') {
+                for (const item of order.items) {
+                    const product = await prodCol.findOne({ id: item.productId });
+                    if (product) {
+                        // Re-inject into the newest batch or create a 'Return' batch
+                        const batches = product.batches || [];
+                        const returnBatch = {
+                            id: `rb-${Date.now()}`,
+                            quantity: item.quantity,
+                            buyingPrice: item.price * 0.7, // Estimate or original cost if available
+                            createdAt: new Date().toISOString(),
+                            isReturn: true
+                        };
+                        await prodCol.updateOne(
+                            { id: item.productId },
+                            { $push: { batches: returnBatch } }
+                        );
+                    }
+                }
+            }
+
+            const updated = { 
+                ...order, 
+                status: 'RETURN_COMPLETED',
+                logs: [...(order.logs || []), { id: `rl-${Date.now()}`, message: 'Return Processed: Stock Restored to Registry', timestamp: new Date().toISOString(), user: 'OMS Scanner' }]
+            };
             await ordersCol.updateOne({ id: order.id }, { $set: clean(updated) });
             return res.json(updated);
         }

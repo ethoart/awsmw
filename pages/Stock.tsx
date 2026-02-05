@@ -15,7 +15,9 @@ import {
   Calendar, 
   Info,
   ArrowRight,
-  History
+  History,
+  Edit3,
+  Check
 } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
 
@@ -30,8 +32,9 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   
   const [newProd, setNewProd] = useState({ name: '', sku: '', price: 0 });
-  
   const [batchForms, setBatchForms] = useState<{[key: string]: { quantity: number, buyingPrice: number }}>({});
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
+  const [tempPrice, setTempPrice] = useState<number>(0);
 
   const load = async () => {
     setLoading(true);
@@ -83,6 +86,19 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
 
     await db.updateProduct(updatedProduct);
     setBatchForms(prev => ({ ...prev, [productId]: { quantity: 0, buyingPrice: 0 } }));
+    load();
+  };
+
+  const handleUpdateBatchPrice = async (productId: string, batchId: string) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
+    const updatedBatches = product.batches.map(b => 
+        b.id === batchId ? { ...b, buyingPrice: tempPrice } : b
+    );
+
+    await db.updateProduct({ ...product, batches: updatedBatches });
+    setEditingBatchId(null);
     load();
   };
 
@@ -206,19 +222,49 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                                     </div>
                                     <div className="space-y-2">
                                         {p.batches.map((batch, idx) => (
-                                            <div key={batch.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                            <div key={batch.id} className={`flex items-center justify-between p-4 rounded-2xl border ${batch.id.startsWith('rb-') ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
                                                 <div className="flex items-center gap-4">
-                                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black ${idx === 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}>
+                                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black ${idx === 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-slate-500 border border-slate-200'}`}>
                                                         {idx + 1}
                                                     </div>
                                                     <div>
-                                                        <p className="text-xs font-black text-slate-900">{batch.quantity} units</p>
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="text-xs font-black text-slate-900">{batch.quantity} units</p>
+                                                            {batch.id.startsWith('rb-') && <span className="bg-rose-600 text-white px-2 py-0.5 rounded text-[7px] font-black uppercase">Returned Stock</span>}
+                                                        </div>
                                                         <p className="text-[9px] font-bold text-slate-400 uppercase">{new Date(batch.createdAt).toLocaleDateString()}</p>
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="text-xs font-black text-slate-500 uppercase">Cost: {formatCurrency(batch.buyingPrice)}</p>
-                                                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-tighter mt-0.5">ID: {batch.id.slice(-6)}</p>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="text-right">
+                                                        {editingBatchId === batch.id ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="number" 
+                                                                    className="w-24 bg-white border border-blue-500 rounded-lg px-2 py-1 text-xs font-black outline-none"
+                                                                    value={tempPrice}
+                                                                    onChange={e => setTempPrice(parseFloat(e.target.value) || 0)}
+                                                                    autoFocus
+                                                                />
+                                                                <button onClick={() => handleUpdateBatchPrice(p.id, batch.id)} className="p-1.5 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition-all">
+                                                                    <Check size={14} />
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex flex-col items-end">
+                                                                <div className="flex items-center gap-2 group/price">
+                                                                    <p className="text-xs font-black text-slate-900 uppercase">Cost: {formatCurrency(batch.buyingPrice)}</p>
+                                                                    <button 
+                                                                        onClick={() => { setEditingBatchId(batch.id); setTempPrice(batch.buyingPrice); }} 
+                                                                        className="p-1 text-slate-300 hover:text-blue-600 opacity-0 group-hover/price:opacity-100 transition-all"
+                                                                    >
+                                                                        <Edit3 size={12}/>
+                                                                    </button>
+                                                                </div>
+                                                                <p className="text-[9px] font-black text-blue-600 uppercase tracking-tighter">ID: {batch.id.slice(-6)}</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}

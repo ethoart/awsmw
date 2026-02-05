@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { db } from '../services/mockBackend';
 import { Order, TenantSettings } from '../types';
 import { formatCurrency, getSLDateString } from '../utils/helpers';
-import { Printer, CalendarCheck, Search, Download, Calendar, Package, RefreshCw } from 'lucide-react';
+import { Printer, CalendarCheck, Search, Download, Calendar, Package, RefreshCw, CheckSquare, Square } from 'lucide-react';
 import { LabelPrintView } from '../components/LabelPrintView';
 
 interface TodayShippedProps {
@@ -18,9 +18,11 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [targetDate, setTargetDate] = useState(getSLDateString());
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setSelectedIds([]);
     try {
         const [fetchedOrders, fetchedTenant] = await Promise.all([
             db.getOrders({ 
@@ -51,6 +53,23 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
           return matchesSearch;
       });
   }, [orders, search]);
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === dailyOrders.length && dailyOrders.length > 0) setSelectedIds([]);
+    else setSelectedIds(dailyOrders.map(o => o.id));
+  };
+
+  const handlePrintSelected = () => {
+    if (selectedIds.length === 0 || !tenantSettings) return;
+    const ordersToPrint = dailyOrders.filter(o => selectedIds.includes(o.id));
+    
+    const printContainer = document.createElement('div');
+    printContainer.className = 'print-only';
+    document.body.appendChild(printContainer);
+    const root = createRoot(printContainer);
+    root.render(<LabelPrintView orders={ordersToPrint} settings={tenantSettings} />);
+    setTimeout(() => { window.print(); root.unmount(); document.body.removeChild(printContainer); }, 500);
+  };
 
   const handlePrintAll = () => {
     if (!dailyOrders.length || !tenantSettings) return;
@@ -100,9 +119,15 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
             >
                 <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
             </button>
-            <button onClick={handlePrintAll} className="px-8 py-3.5 bg-slate-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-black transition-all shadow-2xl flex items-center gap-3">
-                <Printer size={18} /> Print Daily Manifest
-            </button>
+            {selectedIds.length > 0 ? (
+                <button onClick={handlePrintSelected} className="px-8 py-3.5 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-700 transition-all shadow-2xl flex items-center gap-3 animate-bounce">
+                    <Printer size={18} /> Print Selected ({selectedIds.length})
+                </button>
+            ) : (
+                <button onClick={handlePrintAll} className="px-8 py-3.5 bg-slate-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-black transition-all shadow-2xl flex items-center gap-3">
+                    <Printer size={18} /> Print Daily Manifest
+                </button>
+            )}
         </div>
       </div>
 
@@ -128,7 +153,12 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
             <table className="w-full text-left compact-table">
                 <thead>
                     <tr className="bg-slate-50/50">
-                        <th className="pl-8">Node Reference</th>
+                        <th className="w-12 text-center pl-6" onClick={toggleSelectAll}>
+                            <div className={`cursor-pointer ${selectedIds.length === dailyOrders.length && dailyOrders.length > 0 ? 'text-blue-600' : 'text-slate-300'}`}>
+                                {selectedIds.length === dailyOrders.length && dailyOrders.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
+                            </div>
+                        </th>
+                        <th className="pl-4">Node Reference</th>
                         <th>Consignee</th>
                         <th>Manifest Detail</th>
                         <th className="text-center">Status</th>
@@ -139,48 +169,56 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
                 <tbody className={`divide-y divide-slate-50 ${loading ? 'opacity-30' : ''}`}>
                     {dailyOrders.length === 0 ? (
                         <tr>
-                            <td colSpan={6} className="py-32 text-center">
+                            <td colSpan={7} className="py-32 text-center">
                                 <div className="flex flex-col items-center opacity-20">
                                     <Package size={64} className="mb-4 stroke-1" />
                                     <p className="text-sm font-black uppercase tracking-[0.5em]">Log Registry Empty</p>
                                 </div>
                             </td>
                         </tr>
-                    ) : dailyOrders.map(o => (
-                        <tr key={o.id} className="hover:bg-slate-50 transition-colors group">
-                            <td className="pl-8 py-6 font-mono text-[10px] font-black text-slate-400 uppercase tracking-tighter">#{o.id.slice(-8)}</td>
-                            <td className="py-6">
-                                <div className="flex flex-col">
-                                    <span className="font-black text-slate-900 text-[14px] uppercase tracking-tight">{o.customerName}</span>
-                                    <span className="text-[10px] font-bold text-slate-400 mt-0.5">{o.customerPhone}</span>
-                                </div>
-                            </td>
-                            <td className="py-6">
-                                <div className="flex flex-col">
-                                    <span className="text-[11px] font-black text-slate-600 truncate max-w-[220px] uppercase">{o.items[0]?.name}</span>
-                                    <span className="text-[9px] font-mono font-bold text-blue-500 uppercase mt-0.5">{o.trackingNumber || 'Awaiting Logistics...'}</span>
-                                </div>
-                            </td>
-                            <td className="text-center py-6">
-                                <span className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border border-white/10">
-                                    {o.status}
-                                </span>
-                            </td>
-                            <td className="py-6">
-                                <span className="font-black text-slate-900 text-[14px]">{formatCurrency(o.totalAmount)}</span>
-                            </td>
-                            <td className="text-right pr-8 py-6">
-                                <div className="flex items-center justify-end gap-2">
-                                    <button 
-                                        onClick={() => handlePrintSingle(o)} 
-                                        className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-200 rounded-xl transition-all shadow-sm"
-                                    >
-                                        <Printer size={18} />
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    ))}
+                    ) : dailyOrders.map(o => {
+                        const isSelected = selectedIds.includes(o.id);
+                        return (
+                            <tr key={o.id} className={`hover:bg-slate-50 transition-colors group cursor-pointer ${isSelected ? 'bg-blue-50/30' : ''}`} onClick={() => setSelectedIds(prev => prev.includes(o.id) ? prev.filter(x => x !== o.id) : [...prev, o.id])}>
+                                <td className="pl-6 py-6 text-center">
+                                    <div className={`p-1 transition-all ${isSelected ? 'text-blue-600' : 'text-slate-300'}`}>
+                                        {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
+                                    </div>
+                                </td>
+                                <td className="pl-4 py-6 font-mono text-[10px] font-black text-slate-400 uppercase tracking-tighter">#{o.id.slice(-8)}</td>
+                                <td className="py-6">
+                                    <div className="flex flex-col">
+                                        <span className="font-black text-slate-900 text-[14px] uppercase tracking-tight">{o.customerName}</span>
+                                        <span className="text-[10px] font-bold text-slate-400 mt-0.5">{o.customerPhone}</span>
+                                    </div>
+                                </td>
+                                <td className="py-6">
+                                    <div className="flex flex-col">
+                                        <span className="text-[11px] font-black text-slate-600 truncate max-w-[220px] uppercase">{o.items[0]?.name}</span>
+                                        <span className="text-[9px] font-mono font-bold text-blue-500 uppercase mt-0.5">{o.trackingNumber || 'Awaiting Logistics...'}</span>
+                                    </div>
+                                </td>
+                                <td className="text-center py-6">
+                                    <span className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border border-white/10">
+                                        {o.status}
+                                    </span>
+                                </td>
+                                <td className="py-6">
+                                    <span className="font-black text-slate-900 text-[14px]">{formatCurrency(o.totalAmount)}</span>
+                                </td>
+                                <td className="text-right pr-8 py-6">
+                                    <div className="flex items-center justify-end gap-2">
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); handlePrintSingle(o); }} 
+                                            className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-200 rounded-xl transition-all shadow-sm"
+                                        >
+                                            <Printer size={18} />
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        );
+                    })}
                 </tbody>
             </table>
         </div>

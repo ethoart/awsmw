@@ -8,7 +8,7 @@ import {
   Archive, Users, Calendar, ShoppingBag, Star, Activity, Box,
   Award, ListChecks, ArrowUpRight, LayoutDashboard,
   Target, ClipboardList, RotateCw, PackageCheck,
-  XCircle, PhoneOff, UserPlus
+  XCircle, PhoneOff, UserPlus, Coins, ShieldCheck
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, 
@@ -63,18 +63,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const dashboardData = useMemo(() => {
+    // COUNTS
     let deliveredCount = 0;
     let returnedCount = 0;
     let confirmedCount = 0;
     let shippedCount = 0;
-    let totalRevenue = 0;
     let restockCount = 0;
+
+    // VALUES (LKR)
+    let deliveredValue = 0;
+    let returnedValue = 0;
+    let confirmedValue = 0;
+    let shippedValue = 0;
+    let restockValue = 0;
 
     const today = getSLDateString();
     let todayOrders = 0;
     let todayRevenue = 0;
-    let todayShipped = 0;
-    let todayReturns = 0;
+    let todayShippedCount = 0;
+    let todayReturnsCount = 0;
 
     const filteredShippedProducts: { [name: string]: number } = {};
     const scannedReturnProducts: { [name: string]: { count: number, sku: string } } = {};
@@ -120,11 +127,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         const shipIsInRange = shipDate && shipDate >= startDate && shipDate <= endDate;
         
         if (createDate === today) todayOrders++;
-        if (shipDate === today) todayShipped++;
+        if (shipDate === today) todayShippedCount++;
         if (o.status === OrderStatus.DELIVERED && shipDate === today) todayRevenue += o.totalAmount;
-        if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturns++;
+        if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturnsCount++;
 
+        // Value Mapping based on Status in current range
         if (isInRange) {
+          if (o.status === OrderStatus.CONFIRMED) {
+            confirmedCount++;
+            confirmedValue += o.totalAmount;
+          }
+          if (o.status === OrderStatus.RETURN_COMPLETED) {
+            restockCount++;
+            restockValue += o.totalAmount;
+          }
+          if (o.status === OrderStatus.RETURNED || o.status === OrderStatus.REJECTED) {
+            returnedCount++;
+            returnedValue += o.totalAmount;
+          }
+
           o.items.forEach(item => {
             if (productStats[item.productId]) {
               productStats[item.productId].salesCount += item.quantity;
@@ -146,12 +167,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         }
 
         if (shipIsInRange) {
+          shippedCount++;
+          shippedValue += o.totalAmount;
+          
           o.items.forEach(item => {
             filteredShippedProducts[item.name] = (filteredShippedProducts[item.name] || 0) + item.quantity;
             if (productStats[item.productId]) {
               productStats[item.productId].shipped += item.quantity;
             }
           });
+          
+          if (o.status === OrderStatus.DELIVERED) {
+            deliveredCount++;
+            deliveredValue += o.totalAmount;
+            if (dailyMap[shipDate]) dailyMap[shipDate].sales += o.totalAmount;
+            
+            o.items.forEach(item => { 
+                if(productStats[item.productId]) {
+                    productStats[item.productId].delivered += item.quantity;
+                    productStats[item.productId].revenue += (item.price * item.quantity);
+                    const prodRef = products.find(pr => pr.id === item.productId);
+                    const avgCost = prodRef?.batches?.reduce((acc, b) => acc + b.buyingPrice, 0) / (prodRef?.batches?.length || 1) || 0;
+                    productStats[item.productId].profit += ((item.price - avgCost) * item.quantity);
+                }
+            });
+          }
         }
 
         if (o.logs) {
@@ -166,43 +206,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                     if (log.message.includes('NO_ANSWER')) teamStats[log.user].noAnswers++;
                     if (log.message.includes('OPEN_LEAD')) teamStats[log.user].openLeads++;
                 }
-
-                if (logInRange && (log.message.includes('CONFIRMED') || log.message.includes('Order transitioned to CONFIRMED'))) {
-                    confirmedCount++;
-                }
             });
-        }
-
-        if (shipIsInRange && o.status === OrderStatus.DELIVERED) {
-            deliveredCount++;
-            totalRevenue += o.totalAmount;
-            if (dailyMap[shipDate]) dailyMap[shipDate].sales += o.totalAmount;
-            
-            o.items.forEach(item => { 
-                if(productStats[item.productId]) {
-                    productStats[item.productId].delivered += item.quantity;
-                    productStats[item.productId].revenue += (item.price * item.quantity);
-                    const prodRef = products.find(pr => pr.id === item.productId);
-                    const avgCost = prodRef?.batches?.reduce((acc, b) => acc + b.buyingPrice, 0) / (prodRef?.batches?.length || 1) || 0;
-                    productStats[item.productId].profit += ((item.price - avgCost) * item.quantity);
-                }
-            });
-        }
-
-        if (shipIsInRange) {
-            shippedCount++;
-            if (dailyMap[shipDate]) dailyMap[shipDate].shipped++;
-        }
-
-        if (isInRange) {
-            if (o.status === OrderStatus.RETURN_COMPLETED) restockCount++;
-            if (o.status.includes('RETURN') || o.status === OrderStatus.REJECTED) returnedCount++;
         }
     });
 
     return {
-        stats: { deliveredCount, returnedCount, confirmedCount, shippedCount, totalRevenue, restockCount },
-        today: { todayOrders, todayRevenue, todayShipped, todayReturns },
+        stats: { 
+          deliveredCount, deliveredValue,
+          returnedCount, returnedValue,
+          confirmedCount, confirmedValue,
+          shippedCount, shippedValue,
+          restockCount, restockValue
+        },
+        today: { todayOrders, todayRevenue, todayShippedCount, todayReturnsCount },
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
         scannedReturnManifest: Object.entries(scannedReturnProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
@@ -210,6 +226,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         teamLeaderboard: Object.values(teamStats).sort((a,b) => b.confirms - a.confirms)
     };
   }, [orders, products, team, startDate, endDate]);
+
+  const statsCards = [
+    { label: 'Delivered Sales', val: formatCurrency(dashboardData.stats.deliveredValue), sub: `${dashboardData.stats.deliveredCount} Orders Settled`, icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', trend: 'Value Realized' },
+    { label: 'Confirmed Sales', val: formatCurrency(dashboardData.stats.confirmedValue), sub: `${dashboardData.stats.confirmedCount} In Pipeline`, icon: <ShieldCheck/>, col: 'bg-blue-50 text-blue-600', trend: 'Value Committed' },
+    { label: 'Shipping Value', val: formatCurrency(dashboardData.stats.shippedValue), sub: `${dashboardData.stats.shippedCount} Dispatched`, icon: <Truck/>, col: 'bg-indigo-50 text-indigo-600', trend: 'Value in Transit' },
+    { label: 'Return Value', val: formatCurrency(dashboardData.stats.returnedValue), sub: `${dashboardData.stats.returnedCount} Failed Leads`, icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', trend: 'Value Lost' },
+    { label: 'Scanned Returns', val: formatCurrency(dashboardData.stats.restockValue), sub: `${dashboardData.stats.restockCount} Back to Stock`, icon: <Archive/>, col: 'bg-amber-50 text-amber-600', trend: 'Value Recovered' },
+    { label: 'Net Liquidity', val: formatCurrency(dashboardData.stats.deliveredValue), sub: 'Total Cash Settled', icon: <Coins/>, col: 'bg-slate-950 text-white', trend: 'Master Balance' },
+  ];
 
   return (
     <div className="space-y-6 animate-slide-in max-w-[1600px] mx-auto pb-20 px-2">
@@ -241,22 +266,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          {[
-            { label: 'Delivered', val: formatFullNumber(dashboardData.stats.deliveredCount), icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', sub: 'Net Success' },
-            { label: 'Confirmed', val: formatFullNumber(dashboardData.stats.confirmedCount), icon: <Star/>, col: 'bg-blue-50 text-blue-600', sub: 'Validated Pipeline' },
-            { label: 'Shipping Count', val: formatFullNumber(dashboardData.stats.shippedCount), icon: <Truck/>, col: 'bg-indigo-50 text-indigo-600', sub: 'Total Dispatches' },
-            { label: 'Total Returns', val: formatFullNumber(dashboardData.stats.returnedCount), icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', sub: 'Failed Pipeline' },
-            { label: 'Milky Way Scanned', val: formatFullNumber(dashboardData.stats.restockCount), icon: <Archive/>, col: 'bg-amber-50 text-amber-600', sub: 'Terminal Scans' },
-            { label: 'Revenue Pool', val: formatCurrency(dashboardData.stats.totalRevenue), icon: <DollarSign/>, col: 'bg-slate-950 text-white', sub: 'Precision Balance' },
-          ].map((s, i) => (
-            <div key={i} className="p-6 rounded-[2.5rem] border border-slate-100 shadow-sm bg-white hover:border-blue-200 transition-all group relative overflow-hidden">
+          {statsCards.map((s, i) => (
+            <div key={i} className="p-6 rounded-[2.5rem] border border-slate-100 shadow-sm bg-white hover:border-blue-200 transition-all group relative overflow-hidden flex flex-col justify-between min-h-[160px]">
                 <div className="absolute top-0 right-0 w-24 h-24 bg-slate-50 rounded-full -translate-y-1/2 translate-x-1/2 opacity-50 group-hover:bg-blue-50 transition-colors"></div>
-                <div className={`w-12 h-12 ${s.col} rounded-2xl flex items-center justify-center mb-5 shadow-sm group-hover:scale-110 transition-transform relative z-10`}>
-                  {React.cloneElement(s.icon as any, { size: 22 })}
+                <div>
+                    <div className={`w-10 h-10 ${s.col} rounded-xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform relative z-10`}>
+                      {React.cloneElement(s.icon as any, { size: 18 })}
+                    </div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 relative z-10">{s.label}</p>
+                    <p className="text-lg font-black text-slate-900 tracking-tighter relative z-10 truncate">{s.val}</p>
                 </div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 relative z-10">{s.label}</p>
-                <p className="text-xl font-black text-slate-900 truncate tracking-tighter relative z-10">{s.val}</p>
-                <p className="text-[8px] font-bold text-slate-300 uppercase mt-1 tracking-widest relative z-10">{s.sub}</p>
+                <div className="relative z-10 mt-2">
+                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-tight">{s.sub}</p>
+                    <p className="text-[8px] font-bold text-slate-300 uppercase mt-0.5 tracking-widest">{s.trend}</p>
+                </div>
             </div>
           ))}
       </div>
@@ -322,9 +345,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             <div className="grid grid-cols-2 gap-4 relative z-10">
               {[
                   { label: "Today's Inbound", val: formatFullNumber(dashboardData.today.todayOrders), icon: <Target className="text-blue-400" /> },
-                  { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShipped), icon: <Truck className="text-amber-400" /> },
+                  { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShippedCount), icon: <Truck className="text-amber-400" /> },
                   { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
-                  { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturns), icon: <RotateCcw className="text-rose-400" /> },
+                  { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturnsCount), icon: <RotateCcw className="text-rose-400" /> },
               ].map((stat, i) => (
                   <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
                       <div className="flex items-center gap-3 mb-2">

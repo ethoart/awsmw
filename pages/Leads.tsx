@@ -31,7 +31,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
     address: '', 
     productId: '',
     trackingNumber: '',
-    city: 'Colombo',
+    city: '', // Default empty to force selection
     weight: '1'
   });
   const [customerHistory, setCustomerHistory] = useState<any>(null);
@@ -48,7 +48,6 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
     db.getGlobalCities().then(c => {
         const cityList = Array.from(new Set(c.length > 0 ? c : SRI_LANKA_CITIES_FALLBACK));
         setCities(cityList);
-        setManualForm(prev => ({ ...prev, city: cityList.includes('Colombo') ? 'Colombo' : cityList[0] }));
     });
     const saved = localStorage.getItem('mw_user');
     if (saved) setCurrentUser(JSON.parse(saved).username);
@@ -69,7 +68,8 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
 
   const handleManualSubmit = async () => {
     if (!manualForm.name || !manualForm.phone || !manualForm.productId || !manualForm.address) return alert("CRITICAL: Name, Phone, Address, and SKU are mandatory.");
-    
+    if (!manualForm.city) return alert("City Selection Required.");
+
     const isExistingMode = tenant?.settings.courierMode === CourierMode.EXISTING_WAYBILL;
     if (isExistingMode && !manualForm.trackingNumber) return alert("Existing Waybill ID is mandatory for this cluster mode.");
 
@@ -102,7 +102,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
         address: '', 
         productId: '', 
         trackingNumber: '', 
-        city: cities.includes('Colombo') ? 'Colombo' : cities[0], 
+        city: '', 
         weight: '1' 
     });
     setCustomerHistory(null);
@@ -143,7 +143,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
         customerName: lead.name,
         customerPhone: lead.phone,
         customerAddress: lead.address,
-        customerCity: lead.city || (cities.includes('Colombo') ? 'Colombo' : cities[0]),
+        customerCity: lead.city || 'Colombo', // Fallback for bulk only if needed, or leave empty
         parcelWeight: '1',
         items: [{ productId: p.id, name: p.name, price: p.price, quantity: 1 }],
         totalAmount: p.price,
@@ -227,6 +227,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
                                 value={manualForm.city} 
                                 onChange={(e) => setManualForm({...manualForm, city: e.target.value})}
                             >
+                                <option value="">Select City...</option>
                                 {cities.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
                             </select>
                             <MapPin className="absolute right-5 bottom-3.5 text-indigo-300 pointer-events-none" size={18} />
@@ -263,6 +264,20 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
                     placeholder="Full street address..."
                   />
                 </div>
+                {!isExistingMode && (
+                    <div className="space-y-1.5 relative">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Recipient City</label>
+                        <select 
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-black text-slate-900 outline-none appearance-none"
+                            value={manualForm.city} 
+                            onChange={(e) => setManualForm({...manualForm, city: e.target.value})}
+                        >
+                            <option value="">Select City...</option>
+                            {cities.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                        </select>
+                        <MapPin className="absolute right-5 bottom-3.5 text-slate-400 pointer-events-none" size={18} />
+                    </div>
+                )}
                 <div className="space-y-2 relative">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">SKU Assignment</label>
                   <select 
@@ -295,6 +310,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
             </div>
 
             <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
+                {/* ... CSV SECTION REMAIN UNCHANGED ... */}
                 <div className="flex items-center justify-between pb-6 border-b border-slate-50">
                     <div className="flex items-center gap-3">
                         <div className="w-12 h-12 bg-slate-950 text-white rounded-2xl flex items-center justify-center shadow-lg">

@@ -118,11 +118,12 @@ export const OrderList: React.FC<OrderListProps> = ({
   };
 
   const handleBulkShip = async () => {
-    if (!confirm(`Logistics Sync: Transmit ${selectedIds.length} leads to Courier?`)) return;
+    if (!confirm(`Logistics Sync: Transmit selected leads to Courier? Note: Only CONFIRMED orders will be processed.`)) return;
     setBulkProcessing(true);
     
     let successCount = 0;
     let failCount = 0;
+    let skipCount = 0;
     let lastError = '';
 
     const targetIds = [...selectedIds];
@@ -131,6 +132,14 @@ export const OrderList: React.FC<OrderListProps> = ({
         const order = orders.find(o => o.id === id);
         
         if (order) {
+            // STRICT FILTER: Only ship CONFIRMED orders. 
+            // Skips ALREADY SHIPPED and PENDING/OPEN_LEAD.
+            if (order.status !== OrderStatus.CONFIRMED) {
+                console.warn(`Skipping ${order.id}: Status is ${order.status}, expected CONFIRMED.`);
+                skipCount++;
+                continue;
+            }
+
             setBulkProgressMsg(`SHIPPING ${i+1}/${targetIds.length}: ${order.customerName}`);
             try {
                 // SEQUENTIAL DISPATCH with robust error trapping
@@ -149,11 +158,9 @@ export const OrderList: React.FC<OrderListProps> = ({
     setBulkProcessing(false);
     setBulkProgressMsg('');
     
-    if (failCount > 0) {
-        alert(`Bulk Dispatch Summary:\n- SUCCESS: ${successCount}\n- FAILED: ${failCount}\n\nLast FDE Error: ${lastError}`);
-    } else {
-        alert(`Logistics Success: ${successCount} Waybills generated.`);
-    }
+    let summary = `Logistics Summary:\n- Processed: ${successCount}\n- Failed: ${failCount}\n- Skipped (Not Confirmed/Already Shipped): ${skipCount}`;
+    if (failCount > 0) summary += `\n\nLast Error: ${lastError}`;
+    alert(summary);
     
     setSelectedIds([]);
     await loadData();

@@ -64,7 +64,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
         setTenant(fetchedTenant || null);
         db.getCustomerDetailedHistory(data.customerPhone, tenantId).then(h => setCustomerHistory(h.filter(x => x.id !== orderId))).catch(() => {});
 
-        const initialCity = data.customerCity || (uniqueCities.includes('Colombo') ? 'Colombo' : uniqueCities[0]);
+        const initialCity = data.customerCity || ''; // No default fallback, must be explicit
         setCitySearch(initialCity);
 
         let dateVal = '';
@@ -132,6 +132,18 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     if (!order) return;
     const user = localStorage.getItem('mw_user') ? JSON.parse(localStorage.getItem('mw_user')!).username : 'System';
     
+    // ACTION: Confirm Stock Availability for Confirmation
+    if (newStatus === OrderStatus.CONFIRMED) {
+        for (const item of items) {
+            const product = products.find(p => p.id === item.productId);
+            const availableStock = (product?.batches || []).reduce((sum, b) => sum + b.quantity, 0);
+            if (availableStock < item.quantity) {
+                alert(`INSUFFICIENT STOCK: SKU [${product?.sku || 'UNKNOWN'}] only has ${availableStock} units available. Order cannot be confirmed.`);
+                return;
+            }
+        }
+    }
+
     const needsStockReduction = (newStatus === OrderStatus.CONFIRMED || newStatus === OrderStatus.SHIPPED) && 
                                order.status !== OrderStatus.CONFIRMED && 
                                order.status !== OrderStatus.SHIPPED;
@@ -141,6 +153,10 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     }
 
     if (newStatus === OrderStatus.SHIPPED) {
+      // PREVENT DOUBLE SHIPPING & SHIP ONLY CONFIRMED
+      if (order.status === OrderStatus.SHIPPED) return alert("System Warning: This lead has already been dispatched.");
+      if (order.status !== OrderStatus.CONFIRMED) return alert("System Warning: Only CONFIRMED orders can be dispatched to logistics.");
+
       if (tenant?.settings.courierMode === CourierMode.EXISTING_WAYBILL && !localFormData.trackingNumber) return alert("Waybill ID required.");
       setShippingLoading(true);
       try { 
@@ -299,7 +315,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                         <div className="space-y-1.5 relative" ref={cityDropdownRef}>
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">City Hub</label>
                             <div className="relative">
-                                <input className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 font-bold outline-none focus:ring-2 focus:ring-blue-600" value={citySearch} onFocus={() => setIsCityDropdownOpen(true)} onChange={e => { setCitySearch(e.target.value); setIsCityDropdownOpen(true); }} />
+                                <input className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 font-bold outline-none focus:ring-2 focus:ring-blue-600" value={citySearch} onFocus={() => setIsCityDropdownOpen(true)} onChange={e => { setCitySearch(e.target.value); setIsCityDropdownOpen(true); }} placeholder="Search city..." />
                                 <MapPin className="absolute right-5 bottom-3.5 text-slate-400" size={18} />
                             </div>
                             {isCityDropdownOpen && (
