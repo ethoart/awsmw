@@ -228,12 +228,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
   }, [orders, products, team, startDate, endDate]);
 
   const statsCards = [
-    { label: 'Delivered Sales', val: formatCurrency(dashboardData.stats.deliveredValue), sub: `${dashboardData.stats.deliveredCount} Orders Settled`, icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', trend: 'Value Realized' },
-    { label: 'Confirmed Sales', val: formatCurrency(dashboardData.stats.confirmedValue), sub: `${dashboardData.stats.confirmedCount} In Pipeline`, icon: <ShieldCheck/>, col: 'bg-blue-50 text-blue-600', trend: 'Value Committed' },
-    { label: 'Shipping Value', val: formatCurrency(dashboardData.stats.shippedValue), sub: `${dashboardData.stats.shippedCount} Dispatched`, icon: <Truck/>, col: 'bg-indigo-50 text-indigo-600', trend: 'Value in Transit' },
-    { label: 'Return Value', val: formatCurrency(dashboardData.stats.returnedValue), sub: `${dashboardData.stats.returnedCount} Failed Leads`, icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', trend: 'Value Lost' },
-    { label: 'Scanned Returns', val: formatCurrency(dashboardData.stats.restockValue), sub: `${dashboardData.stats.restockCount} Back to Stock`, icon: <Archive/>, col: 'bg-amber-50 text-amber-600', trend: 'Value Recovered' },
-    { label: 'Net Liquidity', val: formatCurrency(dashboardData.stats.deliveredValue), sub: 'Total Cash Settled', icon: <Coins/>, col: 'bg-slate-950 text-white', trend: 'Master Balance' },
+    { label: 'Delivered', count: dashboardData.stats.deliveredCount, value: dashboardData.stats.deliveredValue, sub: 'Orders Settled', icon: <PackageCheck/>, col: 'bg-emerald-50 text-emerald-600', trend: 'Value Realized' },
+    { label: 'Confirmed', count: dashboardData.stats.confirmedCount, value: dashboardData.stats.confirmedValue, sub: 'In Pipeline', icon: <ShieldCheck/>, col: 'bg-blue-50 text-blue-600', trend: 'Value Committed' },
+    { label: 'Shipped', count: dashboardData.stats.shippedCount, value: dashboardData.stats.shippedValue, sub: 'Dispatched', icon: <Truck/>, col: 'bg-indigo-50 text-indigo-600', trend: 'Value in Transit' },
+    { label: 'Returned', count: dashboardData.stats.returnedCount, value: dashboardData.stats.returnedValue, sub: 'Failed Leads', icon: <RotateCcw/>, col: 'bg-rose-50 text-rose-600', trend: 'Value Lost' },
+    { label: 'Restocked', count: dashboardData.stats.restockCount, value: dashboardData.stats.restockValue, sub: 'Back to Stock', icon: <Archive/>, col: 'bg-amber-50 text-amber-600', trend: 'Value Recovered' },
+    { label: 'Cashflow', count: dashboardData.stats.deliveredCount, value: dashboardData.stats.deliveredValue, sub: 'Total Cash Settled', icon: <Coins/>, col: 'bg-slate-950 text-white', trend: 'Master Balance' },
   ];
 
   return (
@@ -274,11 +274,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                       {React.cloneElement(s.icon as any, { size: 18 })}
                     </div>
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 relative z-10">{s.label}</p>
-                    <p className="text-lg font-black text-slate-900 tracking-tighter relative z-10 truncate">{s.val}</p>
+                    <p className="text-4xl font-black text-slate-900 tracking-tighter relative z-10">{formatFullNumber(s.count, 0)}</p>
                 </div>
                 <div className="relative z-10 mt-2">
-                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-tight">{s.sub}</p>
-                    <p className="text-[8px] font-bold text-slate-300 uppercase mt-0.5 tracking-widest">{s.trend}</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">{formatCurrency(s.value)}</p>
+                    <p className="text-[8px] font-bold text-blue-600 uppercase mt-0.5 tracking-widest">{s.sub}</p>
                 </div>
             </div>
           ))}
@@ -344,10 +344,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             </h3>
             <div className="grid grid-cols-2 gap-4 relative z-10">
               {[
-                  { label: "Today's Inbound", val: formatFullNumber(dashboardData.today.todayOrders), icon: <Target className="text-blue-400" /> },
-                  { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShippedCount), icon: <Truck className="text-amber-400" /> },
+                  { label: "Today's Inbound", val: formatFullNumber(dashboardData.today.todayOrders, 0), icon: <Target className="text-blue-400" /> },
+                  { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShippedCount, 0), icon: <Truck className="text-amber-400" /> },
                   { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
-                  { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturnsCount), icon: <RotateCcw className="text-rose-400" /> },
+                  { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturnsCount, 0), icon: <RotateCcw className="text-rose-400" /> },
               ].map((stat, i) => (
                   <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
                       <div className="flex items-center gap-3 mb-2">

@@ -143,7 +143,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
         customerName: lead.name,
         customerPhone: lead.phone,
         customerAddress: lead.address,
-        customerCity: lead.city || 'Colombo', // Fallback for bulk only if needed, or leave empty
+        customerCity: lead.city || '', // Changed: No default fallback, empty forces selection later
         parcelWeight: '1',
         items: [{ productId: p.id, name: p.name, price: p.price, quantity: 1 }],
         totalAmount: p.price,

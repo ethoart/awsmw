@@ -320,7 +320,8 @@ app.post('/api/ship-order', async (req, res) => {
         if (phone2) formData.append('recipient_contact_2', phone2);
 
         formData.append('recipient_address', order.customerAddress.toString());
-        formData.append('recipient_city', (order.customerCity || 'Colombo').toString());
+        // Removed default 'Colombo' fallback. If missing, send empty string.
+        formData.append('recipient_city', (order.customerCity || '').toString());
         formData.append('amount', Math.round(order.totalAmount).toString());
         formData.append('exchange', '0');
 
