@@ -75,6 +75,19 @@ const FDE_ERRORS = {
   214: "Maintenance Mode"
 };
 
+const mapStatus = (courierStatus) => {
+    const s = (courierStatus || '').toLowerCase();
+    if (s.includes('delivered')) return 'DELIVERED';
+    if (s.includes('returned')) return 'RETURNED';
+    if (s.includes('handover')) return 'RETURN_HANDOVER';
+    if (s.includes('transfer')) return 'RETURN_TRANSFER';
+    if (s.includes('system')) return 'RETURN_AS_ON_SYSTEM';
+    if (s.includes('delivery')) return 'DELIVERY';
+    if (s.includes('residual')) return 'RESIDUAL';
+    if (s.includes('rearrange')) return 'REARRANGE';
+    return 'SHIPPED'; 
+};
+
 const clean = (obj) => {
   if (!obj) return obj;
   const { _id, ...rest } = obj;
@@ -293,6 +306,45 @@ app.post('/api/process-return', async (req, res) => {
         }
         res.status(404).json({ error: 'Order reference not found' });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Courier Webhook Endpoint
+app.post('/api/courier-webhook', async (req, res) => {
+    try {
+        const { waybill_id, delivery_status } = req.body;
+        if (!waybill_id) return res.status(400).send('Bad Request: waybill_id missing');
+
+        const central = await connectCentral();
+        const tenants = await central.collection('tenants').find({ isActive: true }).toArray();
+
+        for (const tenant of tenants) {
+            try {
+                const db = await getTenantDb(tenant.id);
+                const order = await db.collection('orders').findOne({ trackingNumber: waybill_id });
+                if (order) {
+                    const newStatus = mapStatus(delivery_status);
+                    await db.collection('orders').updateOne(
+                        { id: order.id },
+                        {
+                            $set: { status: newStatus, courierStatus: delivery_status },
+                            $push: { logs: {
+                                id: `l-${Date.now()}`,
+                                message: `WEBHOOK: Status update to ${delivery_status}`,
+                                timestamp: new Date().toISOString(),
+                                user: 'Courier System'
+                            }}
+                        }
+                    );
+                    return res.status(200).send('Success');
+                }
+            } catch (err) {
+                console.error(`Tenant ${tenant.id} scan failed:`, err);
+            }
+        }
+        res.status(404).send('Waybill not found in any registry');
+    } catch (e) {
+        res.status(500).send(e.message);
+    }
 });
 
 app.post('/api/ship-order', async (req, res) => {

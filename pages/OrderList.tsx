@@ -199,7 +199,7 @@ export const OrderList: React.FC<OrderListProps> = ({
               </div>
           </div>
           <div className="flex gap-2">
-            {(status === 'ALL' || status === OrderStatus.CONFIRMED || status === OrderStatus.PENDING || status === OrderStatus.OPEN_LEAD) && (
+            {status === OrderStatus.CONFIRMED && (
               <button disabled={bulkProcessing} onClick={handleBulkShip} className="bg-blue-600 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:bg-blue-700 transition-all disabled:opacity-50">
                 <Truck size={14} /> Bulk Ship
               </button>
