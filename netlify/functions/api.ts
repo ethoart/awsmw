@@ -54,6 +54,47 @@ const mapStatus = (courierStatus: string) => {
     return 'SHIPPED'; 
 };
 
+function parseMultipartData(rawBody: string): any {
+    const result: any = {};
+    if (!rawBody || typeof rawBody !== 'string') return result;
+    
+    // 1. Identify Boundary (scan first few lines)
+    const lines = rawBody.split(/\r?\n/);
+    let boundary = '';
+    for (const line of lines) {
+        if (line.trim().startsWith('--')) {
+            boundary = line.trim();
+            break;
+        }
+    }
+    if (!boundary) return result;
+
+    // 2. Split by boundary
+    const parts = rawBody.split(boundary);
+
+    for (const part of parts) {
+        // 3. Find Name
+        if (!part || !part.includes('name="')) continue;
+        const nameMatch = part.match(/name="([^"]+)"/);
+        if (!nameMatch) continue;
+        
+        const name = nameMatch[1];
+        
+        // 4. Find Value (content after double newline)
+        const headerMatch = part.match(/\r?\n\r?\n/);
+        if (!headerMatch) continue;
+
+        const valueStart = headerMatch.index! + headerMatch[0].length;
+        let value = part.substring(valueStart).trim();
+        
+        // Cleanup trailing dashes from end of body
+        if (value.endsWith('--')) value = value.substring(0, value.length - 2).trim();
+        
+        result[name] = value;
+    }
+    return result;
+}
+
 export const handler: Handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
   const headers = {
@@ -80,6 +121,7 @@ export const handler: Handler = async (event, context) => {
     if (path === '/health') return { statusCode: 200, headers, body: JSON.stringify({ status: 'connected' }) };
 
     let bodyData: any = {};
+    // Basic JSON parse first
     if (event.body && (method === 'POST' || method === 'PUT')) {
         try { bodyData = JSON.parse(event.body); } catch(e) {}
     }
@@ -101,16 +143,20 @@ export const handler: Handler = async (event, context) => {
 
     if (path === '/courier-webhook' && method === 'POST') {
         let payload = bodyData;
-        
-        // Robust Fallback 1: Parse Form URL Encoded manually if JSON parse failed or body is empty but raw body exists
-        if (Object.keys(payload).length === 0 && event.body) {
-             const params = new URLSearchParams(event.body);
+        const rawBody = event.body || '';
+
+        // Robust Fallback 1: Multipart Parser
+        if (Object.keys(payload).length === 0 && rawBody.includes('Content-Disposition: form-data')) {
+             payload = parseMultipartData(rawBody);
+        } else if (Object.keys(payload).length === 0 && rawBody.includes('=')) {
+             // Robust Fallback 2: URL Encoded Parser (manual check for string params)
+             const params = new URLSearchParams(rawBody);
              if (params.has('waybill_id')) {
                  params.forEach((value, key) => { payload[key] = value; });
              }
         }
 
-        // Robust Fallback 2: Check for JSON-in-key edge case
+        // Robust Fallback 3: JSON-in-key edge case
         if (!payload.waybill_id && !payload.waybillId && Object.keys(payload).length === 1) {
              try {
                  const potentialJson = JSON.parse(Object.keys(payload)[0]);
@@ -118,7 +164,6 @@ export const handler: Handler = async (event, context) => {
              } catch(e) {}
         }
 
-        // Robust Fallback 3: Query Params
         const waybill_id = payload.waybill_id || payload.waybillId || event.queryStringParameters?.waybill_id;
         const statusRaw = payload.delivery_status || payload.current_status || payload.status || event.queryStringParameters?.delivery_status;
         const lastUpdate = payload.last_update_time || new Date().toISOString();
@@ -126,6 +171,8 @@ export const handler: Handler = async (event, context) => {
         if (!waybill_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Bad Request: waybill_id missing', receivedPayload: payload }) };
 
         const allTenants = await tenantsCol.find({ isActive: true }).toArray();
+        let found = false;
+        
         for (const t of allTenants) {
             try {
                 let db = centralDb;
@@ -133,21 +180,31 @@ export const handler: Handler = async (event, context) => {
                     const client = await getConnectedClient(t.mongoUri);
                     db = client.db();
                 }
-                const order = await db.collection('orders').findOne({ trackingNumber: waybill_id });
+                
+                const cleanWaybill = String(waybill_id).trim();
+                const order = await db.collection('orders').findOne({ 
+                    trackingNumber: { $regex: `^${cleanWaybill}$`, $options: 'i' } 
+                });
+
                 if (order) {
+                    found = true;
                     const newStatus = mapStatus(statusRaw);
-                    await db.collection('orders').updateOne(
-                        { id: order.id },
-                        {
-                            $set: { status: newStatus, courierStatus: statusRaw },
-                            $push: { logs: { id: `l-${Date.now()}`, message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`, timestamp: new Date().toISOString(), user: 'Courier System' }}
-                        }
-                    );
+                    if (order.status !== newStatus) {
+                        await db.collection('orders').updateOne(
+                            { id: order.id },
+                            {
+                                $set: { status: newStatus, courierStatus: statusRaw },
+                                $push: { logs: { id: `l-${Date.now()}`, message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`, timestamp: new Date().toISOString(), user: 'Courier System' }}
+                            }
+                        );
+                    }
                     return { statusCode: 200, headers, body: 'Success' };
                 }
             } catch (e) { console.error(e); }
         }
-        return { statusCode: 404, headers, body: 'Waybill not found' };
+        
+        // Return 200 if not found to satisfy webhook retry policies
+        return { statusCode: 200, headers, body: 'Waybill Processed (Not in Registry)' };
     }
 
     if (path === '/login' && method === 'POST') {

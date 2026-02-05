@@ -20,7 +20,7 @@ app.use(cors());
 // Standard Parsers
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-// Fallback Parser: Capture anything else (like text/plain or missing content-type) as string
+// Fallback Parser: Capture anything else (like text/plain, multipart without multer, or missing content-type) as string
 app.use(express.text({ type: '*/*', limit: '50mb' }));
 
 let centralClient;
@@ -97,6 +97,48 @@ const clean = (obj) => {
   const { _id, ...rest } = obj;
   return rest;
 };
+
+// Helper: Parse raw multipart string manually without external libs
+function parseMultipartData(rawBody) {
+    const result = {};
+    if (!rawBody || typeof rawBody !== 'string') return result;
+    
+    // 1. Identify Boundary (scan first few lines)
+    const lines = rawBody.split(/\r?\n/);
+    let boundary = '';
+    for (const line of lines) {
+        if (line.trim().startsWith('--')) {
+            boundary = line.trim();
+            break;
+        }
+    }
+    if (!boundary) return result;
+
+    // 2. Split by boundary
+    const parts = rawBody.split(boundary);
+
+    for (const part of parts) {
+        // 3. Find Name
+        if (!part || !part.includes('name="')) continue;
+        const nameMatch = part.match(/name="([^"]+)"/);
+        if (!nameMatch) continue;
+        
+        const name = nameMatch[1];
+        
+        // 4. Find Value (content after double newline)
+        const headerMatch = part.match(/\r?\n\r?\n/);
+        if (!headerMatch) continue;
+
+        const valueStart = headerMatch.index + headerMatch[0].length;
+        let value = part.substring(valueStart).trim();
+        
+        // Cleanup trailing dashes from end of body
+        if (value.endsWith('--')) value = value.substring(0, value.length - 2).trim();
+        
+        result[name] = value;
+    }
+    return result;
+}
 
 app.get('/api/health', (req, res) => res.json({ status: 'connected' }));
 
@@ -319,21 +361,26 @@ app.post('/api/courier-webhook', async (req, res) => {
         let body = req.body || {};
         
         // --- ROBUST BODY PARSING START ---
-        // Handle when body is a string (text/plain or missing content-type)
         if (typeof body === 'string') {
+            // 1. Try JSON
             try { 
-                // Attempt JSON first
-                body = JSON.parse(body); 
+                const json = JSON.parse(body);
+                if (json && typeof json === 'object') body = json;
             } catch (e) {
-                // If not JSON, try to parse as query string (x-www-form-urlencoded format manually)
-                const params = new URLSearchParams(body);
-                if (params.has('waybill_id')) {
-                    body = Object.fromEntries(params);
+                // 2. Try Multipart Form Data (Custom Parser) or URL Encoded
+                if (body.includes('Content-Disposition: form-data')) {
+                    body = parseMultipartData(body);
+                } else if (body.includes('=')) {
+                    // Try parsing as URL encoded string if it looks like one
+                    const params = new URLSearchParams(body);
+                    if (params.has('waybill_id')) {
+                        body = Object.fromEntries(params);
+                    }
                 }
             }
         }
 
-        // Handle Curl/JSON-as-key Edge Case: { '{"json":"val"}': '' }
+        // 4. Handle JSON-as-key edge case (Curl quirks)
         if (!body.waybill_id && !body.waybillId && typeof body === 'object') {
             const keys = Object.keys(body);
             if (keys.length === 1 && keys[0].trim().startsWith('{')) {
@@ -346,7 +393,7 @@ app.post('/api/courier-webhook', async (req, res) => {
             }
         }
 
-        // Fallback to query params if body is still empty
+        // 5. Query Param Fallback
         if ((!body || Object.keys(body).length === 0) && req.query) {
             body = req.query;
         }
@@ -392,7 +439,6 @@ async function handleWebhookUpdate(waybill_id, statusRaw, lastUpdate, res) {
                 found = true;
                 const newStatus = mapStatus(statusRaw);
                 
-                // Only update if status is actually different to avoid log spam
                 if (order.status !== newStatus) {
                     await db.collection('orders').updateOne(
                         { id: order.id },
@@ -415,7 +461,8 @@ async function handleWebhookUpdate(waybill_id, statusRaw, lastUpdate, res) {
     }
     
     if (!found) {
-        res.status(404).send('Waybill not found in any registry');
+        // Return 200 even if not found to stop courier retries if valid waybill but not in our system
+        res.status(200).send('Waybill Processed (Not in Registry)');
     }
 }
 
