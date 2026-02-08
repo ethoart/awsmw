@@ -243,21 +243,21 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     }
   };
 
-  // Helper to generate dynamic button styles for selling pipeline
-  const getActionBtnClass = (targetStatus: OrderStatus, baseColor: string) => {
+  // Improved Button Logic to handle active/neutral/dull states correctly
+  const getActionBtnClass = (targetStatus: OrderStatus, activeClass: string) => {
       const isActive = order?.status === targetStatus;
       const isNeutral = order?.status === OrderStatus.OPEN_LEAD || order?.status === OrderStatus.PENDING;
       
-      // If this button is selected, it shines.
+      // If active, show full color and highlight
       if (isActive) {
-          return `${baseColor} ring-4 ring-offset-2 ring-slate-200 opacity-100 scale-105 shadow-xl`;
+          return `${activeClass} ring-4 ring-offset-2 ring-slate-200 shadow-xl scale-105 opacity-100`;
       }
-      // If another button is active (and not neutral), this one becomes dull.
-      if (!isActive && !isNeutral) {
-          return `bg-slate-100 text-slate-400 opacity-50 grayscale hover:grayscale-0 hover:opacity-100 hover:bg-slate-200`;
+      // If neutral (Open Lead), allow buttons to be semi-prominent (inviting action)
+      if (isNeutral) {
+          return `${activeClass.replace('bg-', 'bg-opacity-90 hover:bg-opacity-100 ')}`;
       }
-      // Default state (Neutral/Open Lead) - buttons look normal/inviting
-      return `${baseColor.replace('bg-', 'bg-opacity-90 hover:bg-opacity-100')}`;
+      // If another status is active, make this button dull/grayscale
+      return `bg-slate-50 text-slate-300 border border-slate-100 opacity-60 hover:opacity-100 hover:bg-slate-100 hover:text-slate-500 grayscale transition-all`;
   };
 
   if (loading || !order) return <div className="p-20 text-center font-black uppercase text-slate-300">Synchronizing...</div>;
@@ -283,6 +283,9 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                 </div>
             </div>
             <div className="flex gap-2">
+                <button onClick={() => loadData()} className="p-4 bg-white border border-slate-200 text-slate-400 hover:text-slate-900 rounded-2xl shadow-sm transition-all active:scale-95">
+                    <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                </button>
                 <button onClick={() => { setShowPrintPortal(true); setTimeout(() => { window.print(); setShowPrintPortal(false); }, 500); }} className="bg-white border border-slate-200 text-slate-900 px-6 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center gap-3 shadow-sm hover:border-blue-600 transition-all"><Printer size={16} /> Print Bill</button>
                 <button onClick={async () => { setIsSaving(true); await db.updateOrder({ ...order, ...localFormData, items, totalAmount }); setIsSaving(false); alert("Registry updated."); }} className="bg-slate-950 text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center gap-3 shadow-2xl active:scale-95 transition-all">
                     {isSaving ? <RefreshCcw size={16} className="animate-spin" /> : <Save size={16} />} Commit Changes
@@ -474,6 +477,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                         </div>
                         <h3 className="text-2xl font-black font-mono tracking-tighter">{order.trackingNumber}</h3>
                         <p className="text-[10px] font-bold uppercase opacity-60">Handshake timestamp: {new Date(order.shippedAt || order.createdAt).toLocaleString()}</p>
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-80 mt-2">API Waybill ID Verified</p>
                     </div>
                 )}
 

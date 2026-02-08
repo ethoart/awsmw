@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { OrderList } from './OrderList';
 import { Order, OrderStatus, Product } from '../types';
-import { ShoppingBag, CheckCircle, Clock, XCircle, Pause, PhoneOff, ListFilter, Box, ChevronDown, RefreshCw } from 'lucide-react';
+import { ShoppingBag, CheckCircle, Clock, XCircle, Pause, PhoneOff, ListFilter, Box, ChevronDown, RefreshCw, Calendar } from 'lucide-react';
 
 interface SellingPipelineProps {
   tenantId: string;
@@ -17,6 +17,9 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   useEffect(() => { 
     db.getProducts(tenantId).then(setProducts); 
@@ -30,7 +33,11 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
       orders.forEach(o => {
           if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return;
           
-          // Always increment ALL to match the OrderList 'ALL' behavior (which shows everything)
+          const created = o.createdAt.split('T')[0];
+          if (startDate && created < startDate) return;
+          if (endDate && created > endDate) return;
+
+          // Always increment ALL to match the OrderList 'ALL' behavior
           stats.ALL++;
 
           // Increment specific selling buckets
@@ -41,7 +48,7 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
       });
     }
     return stats;
-  }, [orders, selectedProductId]);
+  }, [orders, selectedProductId, startDate, endDate]);
 
   const filters = [
     { label: 'ALL LEADS', status: 'ALL', icon: <ListFilter size={14} />, count: counts.ALL },
@@ -63,7 +70,16 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Conversion Pipeline</p>
             </div>
         </div>
-        <div className="flex items-center gap-3">
+        
+        <div className="flex flex-wrap items-center gap-3">
+            {/* Date Filters */}
+            <div className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-2xl border border-slate-100 shadow-sm">
+                <Calendar size={14} className="text-blue-600" />
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+                <span className="text-[10px] font-black text-slate-300 mx-1">TO</span>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+            </div>
+
             <div className="bg-white px-4 py-2.5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3 relative min-w-[200px]">
                 <Box size={14} className="text-blue-600" />
                 <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} className="w-full text-[10px] font-black text-slate-900 outline-none uppercase bg-transparent cursor-pointer appearance-none">
@@ -101,6 +117,8 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
           onSelectOrder={onSelectOrder} 
           status={activeFilter}
           productId={selectedProductId === 'ALL' ? null : selectedProductId}
+          startDate={startDate}
+          endDate={endDate}
           onRefresh={() => setRefreshKey(prev => prev + 1)}
         />
       </div>

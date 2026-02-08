@@ -22,7 +22,8 @@ import {
   Activity,
   ArrowDownLeft,
   ArrowUpRight,
-  RefreshCw
+  RefreshCw,
+  BarChart3
 } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
 
@@ -87,14 +88,13 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                   type: b.isReturn ? 'RESTOCK' : 'IN',
                   productName: p.name,
                   sku: p.sku,
-                  quantity: b.quantity, // Note: This is current qty, ideally we'd track original qty but for now this is best approximation or we rely on log
+                  quantity: b.originalQuantity || b.quantity, 
                   reference: b.isReturn ? 'Return Restock' : 'New Batch',
               });
           });
       });
 
       // 2. Stock OUT (Orders)
-      // Only include orders that deduct stock (Confirmed, Shipped, Delivered)
       const deductStatuses = [OrderStatus.CONFIRMED, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.TRANSFER, OrderStatus.RETURNED]; 
       
       orders.forEach(o => {
@@ -143,6 +143,7 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
     const newBatch: StockBatch = {
       id: `b-${Date.now()}`,
       quantity: form.quantity,
+      originalQuantity: form.quantity, // Track initial added amount
       buyingPrice: form.buyingPrice,
       createdAt: new Date().toISOString()
     };
@@ -315,7 +316,9 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                                                         </div>
                                                         <div>
                                                             <div className="flex items-center gap-2">
-                                                                <p className="text-xs font-black text-slate-900">{batch.quantity} units</p>
+                                                                <p className="text-xs font-black text-slate-900">
+                                                                    Added: {batch.originalQuantity ?? batch.quantity} <span className="text-slate-300 mx-1">|</span> Remaining: <span className={batch.quantity < 5 ? 'text-rose-600' : 'text-emerald-600'}>{batch.quantity}</span>
+                                                                </p>
                                                                 {batch.id.startsWith('rb-') && <span className="bg-rose-600 text-white px-2 py-0.5 rounded text-[7px] font-black uppercase">Returned Stock</span>}
                                                             </div>
                                                             <p className="text-[9px] font-bold text-slate-400 uppercase">{new Date(batch.createdAt).toLocaleDateString()}</p>
@@ -425,7 +428,7 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                                         <div className="flex justify-center">
                                             {h.type === 'IN' ? (
                                                 <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
-                                                    <ArrowDownLeft size={10} /> Stock In
+                                                    <ArrowDownLeft size={10} /> New Batch
                                                 </span>
                                             ) : h.type === 'RESTOCK' ? (
                                                 <span className="bg-blue-50 text-blue-600 border border-blue-100 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-1">

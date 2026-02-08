@@ -77,7 +77,8 @@ export interface User {
 
 export interface StockBatch {
   id: string;
-  quantity: number;
+  quantity: number; // Current remaining
+  originalQuantity?: number; // Initial added amount
   buyingPrice: number;
   createdAt: string;
   isReturn?: boolean;
