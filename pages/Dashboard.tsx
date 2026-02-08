@@ -5,10 +5,10 @@ import { db } from '../services/mockBackend';
 import { formatCurrency, formatFullNumber, getSLDateString } from '../utils/helpers';
 import { 
   RefreshCcw, DollarSign, Truck, RotateCcw, 
-  Archive, Users, Calendar, ShoppingBag, Star, Activity, Box,
+  Archive, Calendar, Star, Activity, Box,
   Award, ListChecks, ArrowUpRight, LayoutDashboard,
   Target, ClipboardList, RotateCw, PackageCheck,
-  XCircle, PhoneOff, UserPlus, Coins, ShieldCheck
+  Coins, ShieldCheck
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, 
@@ -229,19 +229,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
              }
         }
 
+        // --- TEAM PERFORMANCE LOGIC ---
         if (o.logs) {
+            // 1. Interactions: Count any log created by user in range (busyness metric)
             o.logs.forEach(log => {
                 const logDate = getSLDateString(new Date(log.timestamp));
-                const logInRange = logDate >= startDate && logDate <= endDate;
-                
-                if (logInRange && teamStats[log.user]) {
+                if (logDate >= startDate && logDate <= endDate && teamStats[log.user]) {
                     teamStats[log.user].interactions++;
-                    if (log.message.includes('CONFIRMED')) teamStats[log.user].confirms++;
-                    if (log.message.includes('REJECTED')) teamStats[log.user].rejects++;
-                    if (log.message.includes('NO_ANSWER')) teamStats[log.user].noAnswers++;
-                    if (log.message.includes('OPEN_LEAD')) teamStats[log.user].openLeads++;
                 }
             });
+
+            // 2. Outcomes: Attribute based on CURRENT status + LATEST relevant log in range.
+            // This prevents double counting on reversals (e.g., Confirm -> Open Lead -> Confirm only counts 1 if currently confirmed, or 0 if currently Open Lead).
+            
+            const findLatestLogUserInRange = (statusKeyword: string) => {
+                // Iterate backwards to find latest action
+                for (let i = (o.logs?.length || 0) - 1; i >= 0; i--) {
+                    const log = o.logs![i];
+                    if (log.message.toUpperCase().includes(statusKeyword)) {
+                        const logDate = getSLDateString(new Date(log.timestamp));
+                        // Only credit if the decisive action happened in this period
+                        if (logDate >= startDate && logDate <= endDate) {
+                            return log.user;
+                        }
+                        return null; // Found latest action, but out of range -> no credit for this period
+                    }
+                }
+                return null;
+            };
+
+            const confirmedLikeStatuses = [
+                OrderStatus.CONFIRMED, OrderStatus.SHIPPED, OrderStatus.TRANSFER,
+                OrderStatus.DELIVERY, OrderStatus.DELIVERED, OrderStatus.RESIDUAL, 
+                OrderStatus.REARRANGE, OrderStatus.RETURNED, OrderStatus.RETURN_TRANSFER, 
+                OrderStatus.RETURN_AS_ON_SYSTEM, OrderStatus.RETURN_HANDOVER, OrderStatus.RETURN_COMPLETED
+            ];
+
+            // CONFIRMS
+            if (confirmedLikeStatuses.includes(o.status)) {
+                const user = findLatestLogUserInRange('CONFIRMED');
+                if (user && teamStats[user]) teamStats[user].confirms++;
+            }
+
+            // REJECTS
+            if (o.status === OrderStatus.REJECTED) {
+                const user = findLatestLogUserInRange('REJECTED');
+                if (user && teamStats[user]) teamStats[user].rejects++;
+            }
+
+            // NO ANSWERS
+            if (o.status === OrderStatus.NO_ANSWER) {
+                const user = findLatestLogUserInRange('NO_ANSWER');
+                if (user && teamStats[user]) teamStats[user].noAnswers++;
+            }
+
+            // OPEN LEADS (Resets)
+            if (o.status === OrderStatus.OPEN_LEAD) {
+                const user = findLatestLogUserInRange('OPEN_LEAD');
+                if (user && teamStats[user]) teamStats[user].openLeads++;
+            }
         }
     });
 
@@ -320,7 +366,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col">
+        <div className="lg:col-span-8 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col">
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-6">
                 <ClipboardList size={18} className="text-blue-600"/> Dispatch Manifest Registry
             </h3>

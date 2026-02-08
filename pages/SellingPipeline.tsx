@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { OrderList } from './OrderList';
 import { Order, OrderStatus, Product } from '../types';
-import { ShoppingBag, CheckCircle, Clock, XCircle, Pause, PhoneOff, ListFilter, Box, ChevronDown } from 'lucide-react';
+import { ShoppingBag, CheckCircle, Clock, XCircle, Pause, PhoneOff, ListFilter, Box, ChevronDown, RefreshCw } from 'lucide-react';
 
 interface SellingPipelineProps {
   tenantId: string;
@@ -29,10 +29,14 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
     if (orders && orders.length > 0) {
       orders.forEach(o => {
           if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return;
+          
+          // Always increment ALL to match the OrderList 'ALL' behavior (which shows everything)
+          stats.ALL++;
+
+          // Increment specific selling buckets
           const s = o.status as keyof typeof stats;
-          if (stats[s] !== undefined) {
+          if (s !== 'ALL' && stats[s] !== undefined) {
               stats[s]++;
-              stats.ALL++;
           }
       });
     }
@@ -68,6 +72,12 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
                 </select>
                 <ChevronDown size={12} className="absolute right-4 text-slate-400 pointer-events-none" />
             </div>
+            <button 
+                onClick={() => setRefreshKey(prev => prev + 1)} 
+                className="p-3 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+            >
+                <RefreshCw size={18} />
+            </button>
         </div>
       </div>
 
@@ -86,6 +96,7 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
 
       <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm min-h-[600px] overflow-hidden">
         <OrderList 
+          key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
           status={activeFilter}

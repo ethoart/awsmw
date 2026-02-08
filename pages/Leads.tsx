@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db } from '../services/mockBackend';
 import { Product, Order, OrderStatus, Tenant, CourierMode } from '../types';
-import { UserPlus, FileSpreadsheet, CheckCircle2, ChevronDown, History, Package, ShieldAlert, AlertTriangle, Upload, Trash2, Database, Box, Zap, MapPin, Scale } from 'lucide-react';
+import { UserPlus, FileSpreadsheet, CheckCircle2, ChevronDown, History, Package, ShieldAlert, AlertTriangle, Upload, Trash2, Database, Box, Zap, MapPin, Scale, RefreshCw } from 'lucide-react';
 import { parseCSV, formatCurrency } from '../utils/helpers';
 
 const SRI_LANKA_CITIES_FALLBACK = [
@@ -24,6 +24,7 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
   const [cities, setCities] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<string>('System');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
   
   const [manualForm, setManualForm] = useState({ 
     name: '', 
@@ -42,16 +43,22 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
   const [pendingLeads, setPendingLeads] = useState<any[]>([]);
   const [csvProductId, setCsvProductId] = useState('');
 
-  useEffect(() => {
-    db.getProducts(tenantId).then(setProducts);
-    db.getTenant(tenantId).then(setTenant);
-    db.getGlobalCities().then(c => {
-        const cityList = Array.from(new Set(c.length > 0 ? c : SRI_LANKA_CITIES_FALLBACK));
-        setCities(cityList);
-    });
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+        db.getProducts(tenantId).then(setProducts),
+        db.getTenant(tenantId).then(setTenant),
+        db.getGlobalCities().then(c => {
+            const cityList = Array.from(new Set(c.length > 0 ? c : SRI_LANKA_CITIES_FALLBACK));
+            setCities(cityList);
+        })
+    ]);
     const saved = localStorage.getItem('mw_user');
     if (saved) setCurrentUser(JSON.parse(saved).username);
+    setLoading(false);
   }, [tenantId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
     const normalizedPhone = manualForm.phone.replace(/\D/g, '');
@@ -180,11 +187,19 @@ export const Leads: React.FC<LeadsProps> = ({ tenantId, shopName }) => {
             </div>
           </div>
         </div>
-        {message && (
-            <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl animate-bounce ${message.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
-                <CheckCircle2 size={16}/> {message.text}
-            </div>
-        )}
+        <div className="flex items-center gap-4">
+            {message && (
+                <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl animate-bounce ${message.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
+                    <CheckCircle2 size={16}/> {message.text}
+                </div>
+            )}
+            <button 
+                onClick={loadData} 
+                className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+            >
+                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+            </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">

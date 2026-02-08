@@ -80,7 +80,14 @@ const FDE_ERRORS = {
 
 const mapStatus = (courierStatus) => {
     const s = (courierStatus || '').toLowerCase();
+    
+    // Priority: Delivered check
     if (s.includes('delivered')) return 'DELIVERED';
+
+    // Distinguish between forward Transfer and Return Transfer
+    if (s.includes('return') && s.includes('transfer')) return 'RETURN_TRANSFER';
+    if (s.includes('transfer')) return 'TRANSFER';
+
     if (s.includes('returned')) return 'RETURNED';
     if (s.includes('handover')) return 'RETURN_HANDOVER';
     if (s.includes('transfer')) return 'RETURN_TRANSFER';

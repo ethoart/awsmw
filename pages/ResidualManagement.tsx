@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { Order, OrderStatus } from '../types';
 import { OrderList } from './OrderList';
-import { PhoneForwarded, ListFilter, Pause, RefreshCcw } from 'lucide-react';
+import { PhoneForwarded, ListFilter, Pause, RefreshCcw, RefreshCw } from 'lucide-react';
 
 interface ResidualManagementProps {
   tenantId: string;
@@ -56,6 +56,12 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Recovery Terminal for Aging Leads</p>
           </div>
         </div>
+        <button 
+            onClick={() => setRefreshKey(prev => prev + 1)} 
+            className="p-3 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+        >
+            <RefreshCw size={18} />
+        </button>
       </div>
 
       <div className="flex flex-wrap gap-2 bg-white p-2.5 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
@@ -75,6 +81,7 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
 
       <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm min-h-[600px] overflow-hidden">
         <OrderList 
+          key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
           status={activeFilter as any}

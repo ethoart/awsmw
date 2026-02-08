@@ -4,7 +4,7 @@ import { db } from '../services/mockBackend';
 import { Order, OrderStatus, OrderLog, Product, Tenant, CourierMode } from '../types';
 import { 
   ArrowLeft, Truck, Check, Clock, User as UserIcon, Save, 
-  Activity, MapPin, Package, Trash2, Plus, Printer, RefreshCcw, MessageSquare, Zap, Calendar, ShoppingBag, DollarSign, Search, ChevronDown, X, History, ShoppingCart, Scale, Info, CheckCircle2, History as HistoryIcon, UserCheck, ExternalLink, Phone, RotateCcw, AlertCircle
+  Activity, MapPin, Package, Trash2, Plus, Printer, RefreshCcw, MessageSquare, Zap, Calendar, ShoppingBag, DollarSign, Search, ChevronDown, X, History, ShoppingCart, Scale, Info, CheckCircle2, History as HistoryIcon, UserCheck, ExternalLink, Phone, RotateCcw, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
 import { BillPrintView } from '../components/BillPrintView';
@@ -238,8 +238,26 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
       case OrderStatus.REJECTED: return 'bg-rose-50 text-rose-600 border-rose-100';
       case OrderStatus.RETURNED: return 'bg-amber-50 text-amber-600 border-amber-100';
       case OrderStatus.SHIPPED: return 'bg-blue-50 text-blue-600 border-blue-100';
+      case OrderStatus.TRANSFER: return 'bg-indigo-50 text-indigo-600 border-indigo-100';
       default: return 'bg-slate-50 text-slate-500 border-slate-100';
     }
+  };
+
+  // Helper to generate dynamic button styles for selling pipeline
+  const getActionBtnClass = (targetStatus: OrderStatus, baseColor: string) => {
+      const isActive = order?.status === targetStatus;
+      const isNeutral = order?.status === OrderStatus.OPEN_LEAD || order?.status === OrderStatus.PENDING;
+      
+      // If this button is selected, it shines.
+      if (isActive) {
+          return `${baseColor} ring-4 ring-offset-2 ring-slate-200 opacity-100 scale-105 shadow-xl`;
+      }
+      // If another button is active (and not neutral), this one becomes dull.
+      if (!isActive && !isNeutral) {
+          return `bg-slate-100 text-slate-400 opacity-50 grayscale hover:grayscale-0 hover:opacity-100 hover:bg-slate-200`;
+      }
+      // Default state (Neutral/Open Lead) - buttons look normal/inviting
+      return `${baseColor.replace('bg-', 'bg-opacity-90 hover:bg-opacity-100')}`;
   };
 
   if (loading || !order) return <div className="p-20 text-center font-black uppercase text-slate-300">Synchronizing...</div>;
@@ -279,10 +297,30 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                     <div className="flex flex-wrap gap-3">
                         {(!isConfirmed && !isShipped) ? (
                             <>
-                                <button onClick={() => updateStatus(OrderStatus.NO_ANSWER)} className={`px-5 py-3.5 rounded-2xl font-black text-[10px] uppercase transition-all shadow-lg ${order.status === OrderStatus.NO_ANSWER ? 'bg-amber-500 text-white ring-4 ring-amber-100' : 'bg-amber-400 text-black hover:bg-amber-500'}`}>No Answer</button>
-                                <button onClick={() => updateStatus(OrderStatus.REJECTED)} className={`px-5 py-3.5 rounded-2xl font-black text-[10px] uppercase transition-all shadow-lg ${order.status === OrderStatus.REJECTED ? 'bg-rose-700 text-white ring-4 ring-rose-100' : 'bg-rose-600 text-white hover:bg-rose-700'}`}>Rejected</button>
-                                <button onClick={() => updateStatus(OrderStatus.CONFIRMED)} className="px-10 py-3.5 rounded-2xl font-black text-[10px] uppercase shadow-xl transition-all bg-emerald-500 text-white hover:bg-emerald-600 hover:scale-105">CONFIRM ORDER</button>
-                                <button onClick={() => updateStatus(OrderStatus.HOLD)} className={`px-5 py-3.5 rounded-2xl font-black text-[10px] uppercase transition-all shadow-lg ${order.status === OrderStatus.HOLD ? 'bg-purple-700 text-white ring-4 ring-purple-100' : 'bg-purple-600 text-white hover:bg-purple-700'}`}>Hold</button>
+                                <button 
+                                    onClick={() => updateStatus(OrderStatus.NO_ANSWER)} 
+                                    className={`px-5 py-3.5 rounded-2xl font-black text-[10px] uppercase transition-all shadow-md ${getActionBtnClass(OrderStatus.NO_ANSWER, 'bg-amber-400 text-black')}`}
+                                >
+                                    No Answer
+                                </button>
+                                <button 
+                                    onClick={() => updateStatus(OrderStatus.REJECTED)} 
+                                    className={`px-5 py-3.5 rounded-2xl font-black text-[10px] uppercase transition-all shadow-md ${getActionBtnClass(OrderStatus.REJECTED, 'bg-rose-600 text-white')}`}
+                                >
+                                    Rejected
+                                </button>
+                                <button 
+                                    onClick={() => updateStatus(OrderStatus.CONFIRMED)} 
+                                    className={`px-10 py-3.5 rounded-2xl font-black text-[10px] uppercase transition-all shadow-md ${getActionBtnClass(OrderStatus.CONFIRMED, 'bg-emerald-500 text-white')}`}
+                                >
+                                    CONFIRM ORDER
+                                </button>
+                                <button 
+                                    onClick={() => updateStatus(OrderStatus.HOLD)} 
+                                    className={`px-5 py-3.5 rounded-2xl font-black text-[10px] uppercase transition-all shadow-md ${getActionBtnClass(OrderStatus.HOLD, 'bg-purple-600 text-white')}`}
+                                >
+                                    Hold
+                                </button>
                             </>
                         ) : (
                             <>

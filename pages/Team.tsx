@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '../services/mockBackend';
 import { User, UserRole } from '../types';
-import { Plus, Trash2, UserPlus, Shield, Mail, Key, ShieldCheck, CheckCircle2, Users, Lock } from 'lucide-react';
+import { Plus, Trash2, UserPlus, Shield, Mail, Key, ShieldCheck, CheckCircle2, Users, Lock, RefreshCw } from 'lucide-react';
 
 interface TeamProps {
   tenantId: string;
@@ -30,12 +30,15 @@ export const Team: React.FC<TeamProps> = ({ tenantId, shopName }) => {
   const [newRole, setNewRole] = useState<UserRole>(UserRole.ADMIN);
   const [newPermissions, setNewPermissions] = useState<string[]>(['selling']); // Default access
   const [isSaving, setIsSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
     setUsers(await db.getTeamMembers(tenantId));
-  };
+    setLoading(false);
+  }, [tenantId]);
 
-  useEffect(() => { load(); }, [tenantId]);
+  useEffect(() => { load(); }, [load]);
 
   const togglePermission = (id: string) => {
     setNewPermissions(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -65,14 +68,22 @@ export const Team: React.FC<TeamProps> = ({ tenantId, shopName }) => {
 
   return (
     <div className="max-w-6xl mx-auto space-y-10 pb-20 animate-slide-in">
-        <div className="flex items-center gap-4 px-2">
-            <div className="p-4 bg-slate-900 text-white rounded-[1.5rem] shadow-xl">
-                <Users size={32} />
+        <div className="flex items-center justify-between px-2">
+            <div className="flex items-center gap-4">
+                <div className="p-4 bg-slate-900 text-white rounded-[1.5rem] shadow-xl">
+                    <Users size={32} />
+                </div>
+                <div>
+                    <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">{shopName} Team</h2>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Staff Access & Permissions Delegation</p>
+                </div>
             </div>
-            <div>
-                <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">{shopName} Team</h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Staff Access & Permissions Delegation</p>
-            </div>
+            <button 
+                onClick={load} 
+                className="p-3 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+            >
+                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+            </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">

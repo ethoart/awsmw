@@ -42,10 +42,16 @@ const FDE_ERRORS: Record<number, string> = {
 
 const mapStatus = (courierStatus: string) => {
     const s = (courierStatus || '').toLowerCase();
+    
+    // Priority: Delivered check first
     if (s.includes('delivered')) return 'DELIVERED';
+
+    // Distinguish between forward Transfer and Return Transfer
+    if (s.includes('return') && s.includes('transfer')) return 'RETURN_TRANSFER';
+    if (s.includes('transfer')) return 'TRANSFER';
+
     if (s.includes('returned')) return 'RETURNED';
     if (s.includes('handover')) return 'RETURN_HANDOVER';
-    if (s.includes('transfer')) return 'RETURN_TRANSFER';
     if (s.includes('system')) return 'RETURN_AS_ON_SYSTEM';
     if (s.includes('delivery')) return 'DELIVERY';
     if (s.includes('residual')) return 'RESIDUAL';

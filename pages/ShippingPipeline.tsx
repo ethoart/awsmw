@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { db } from '../services/mockBackend';
 import { OrderList } from './OrderList';
 import { OrderStatus } from '../types';
-import { Truck, MapPin, RotateCw, Archive, CheckCircle, Calendar, ListFilter } from 'lucide-react';
+import { Truck, MapPin, RotateCw, Archive, CheckCircle, Calendar, ListFilter, ArrowRightLeft, RefreshCw } from 'lucide-react';
 import { BillPrintView } from '../components/BillPrintView';
 
 interface ShippingPipelineProps {
@@ -15,11 +15,13 @@ interface ShippingPipelineProps {
 
 export const ShippingPipeline: React.FC<ShippingPipelineProps> = ({ tenantId, shopName, onSelectOrder }) => {
   const [activeFilter, setActiveFilter] = useState<OrderStatus | 'ALL' | 'TODAY_SHIPPED'>('ALL');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const filters = [
     { label: 'ALL LOGISTICS', status: 'ALL', icon: <ListFilter size={14} /> },
     { label: 'TODAY DISPATCHED', status: 'TODAY_SHIPPED', icon: <Calendar size={14} /> },
     { label: 'SHIPPED', status: OrderStatus.SHIPPED, icon: <Truck size={14} /> },
+    { label: 'TRANSFER', status: OrderStatus.TRANSFER, icon: <ArrowRightLeft size={14} /> }, 
     { label: 'DELIVERY', status: OrderStatus.DELIVERY, icon: <MapPin size={14} /> },
     { label: 'DELIVERED', status: OrderStatus.DELIVERED, icon: <CheckCircle size={14} /> },
     { label: 'RESIDUAL', status: OrderStatus.RESIDUAL, icon: <RotateCw size={14} /> },
@@ -54,14 +56,22 @@ export const ShippingPipeline: React.FC<ShippingPipelineProps> = ({ tenantId, sh
   return (
     <div className="space-y-6 animate-slide-in">
       <div className="flex flex-col gap-6">
-        <div className="flex items-center gap-3 px-2">
-            <div className="p-3 bg-black text-white rounded-2xl shadow-xl rotate-3">
-                <Truck size={24} />
+        <div className="flex items-center justify-between px-2">
+            <div className="flex items-center gap-3">
+                <div className="p-3 bg-black text-white rounded-2xl shadow-xl rotate-3">
+                    <Truck size={24} />
+                </div>
+                <div>
+                    <h2 className="text-3xl font-black text-black tracking-tighter uppercase leading-none">{shopName} Logistics</h2>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Shipment Tracking & Status Control</p>
+                </div>
             </div>
-            <div>
-                <h2 className="text-3xl font-black text-black tracking-tighter uppercase leading-none">{shopName} Logistics</h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Shipment Tracking & Status Control</p>
-            </div>
+            <button 
+                onClick={() => setRefreshKey(prev => prev + 1)} 
+                className="p-3 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+            >
+                <RefreshCw size={18} />
+            </button>
         </div>
 
         <div className="flex flex-wrap gap-2 bg-white p-2.5 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
@@ -84,6 +94,7 @@ export const ShippingPipeline: React.FC<ShippingPipelineProps> = ({ tenantId, sh
 
       <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm min-h-[600px] overflow-hidden">
         <OrderList 
+          key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
           status={activeFilter}

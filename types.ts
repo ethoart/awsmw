@@ -13,6 +13,7 @@ export enum OrderStatus {
   HOLD = 'HOLD',
   CONFIRMED = 'CONFIRMED',
   SHIPPED = 'SHIPPED',
+  TRANSFER = 'TRANSFER', // Added for forward logistics hub transfer
   DELIVERY = 'DELIVERY',
   RESIDUAL = 'RESIDUAL',
   REARRANGE = 'REARRANGE',
@@ -79,6 +80,7 @@ export interface StockBatch {
   quantity: number;
   buyingPrice: number;
   createdAt: string;
+  isReturn?: boolean;
 }
 
 export interface Product {

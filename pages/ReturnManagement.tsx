@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { Order, OrderStatus } from '../types';
 import { OrderList } from './OrderList';
-import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck } from 'lucide-react';
+import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw } from 'lucide-react';
 
 interface ReturnManagementProps {
   tenantId: string;
@@ -93,17 +93,25 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
           </div>
         </div>
 
-        <form onSubmit={handleScan} className="relative w-full md:w-96">
-          <input 
-            ref={scanRef}
-            className="w-full bg-white border-2 border-slate-100 rounded-[1.5rem] pl-12 pr-4 py-4 text-sm font-black outline-none focus:border-blue-600 shadow-sm transition-all"
-            value={scanInput}
-            onChange={e => setScanInput(e.target.value)}
-            placeholder="Scan ID to Restock & Complete..."
-          />
-          <Scan className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          {isProcessing && <div className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>}
-        </form>
+        <div className="flex items-center gap-3 w-full md:w-auto">
+            <form onSubmit={handleScan} className="relative w-full md:w-80">
+                <input 
+                    ref={scanRef}
+                    className="w-full bg-white border-2 border-slate-100 rounded-[1.5rem] pl-12 pr-4 py-4 text-sm font-black outline-none focus:border-blue-600 shadow-sm transition-all"
+                    value={scanInput}
+                    onChange={e => setScanInput(e.target.value)}
+                    placeholder="Scan ID to Restock & Complete..."
+                />
+                <Scan className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                {isProcessing && <div className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>}
+            </form>
+            <button 
+                onClick={() => setRefreshKey(prev => prev + 1)} 
+                className="p-4 bg-white border-2 border-slate-100 rounded-[1.5rem] text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+            >
+                <RefreshCw size={20} />
+            </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 bg-white p-2.5 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
@@ -123,6 +131,7 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
 
       <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm min-h-[600px] overflow-hidden">
         <OrderList 
+          key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
           status={activeFilter as any}
