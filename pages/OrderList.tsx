@@ -248,7 +248,7 @@ export const OrderList: React.FC<OrderListProps> = ({
                    {selectedIds.length === orders.length && orders.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
                 </div>
               </th>
-              <th>Reference</th>
+              <th>Reference / Waybill</th>
               <th>Consignee</th>
               <th className="text-center">History Intel</th>
               <th>Total</th>
@@ -271,7 +271,14 @@ export const OrderList: React.FC<OrderListProps> = ({
                       {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
                     </div>
                   </td>
-                  <td><span className="font-mono text-[10px] font-bold text-slate-400">#{order.id.slice(-8)}</span></td>
+                  <td>
+                    <div className="flex flex-col">
+                        <span className="font-mono text-[10px] font-bold text-slate-400">#{order.id.slice(-8)}</span>
+                        {order.trackingNumber && (
+                            <span className="text-[9px] font-black text-blue-600 mt-0.5 tracking-wider">{order.trackingNumber}</span>
+                        )}
+                    </div>
+                  </td>
                   <td>
                     <div className="flex flex-col">
                       <span className="text-[13px] font-black uppercase text-slate-900">{order.customerName}</span>

@@ -428,14 +428,14 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                     </div>
                 </div>
 
-                {isShipped && order.trackingNumber && (
+                {order.trackingNumber && (
                     <div className="bg-blue-600 text-white p-10 rounded-[3rem] shadow-2xl space-y-4">
                         <div className="flex items-center gap-2 opacity-60">
                             <Truck size={16} />
                             <h4 className="text-[10px] font-black uppercase tracking-widest">Logistics Waybill</h4>
                         </div>
                         <h3 className="text-2xl font-black font-mono tracking-tighter">{order.trackingNumber}</h3>
-                        <p className="text-[10px] font-bold uppercase opacity-60">Handshake timestamp: {new Date(order.shippedAt!).toLocaleString()}</p>
+                        <p className="text-[10px] font-bold uppercase opacity-60">Handshake timestamp: {new Date(order.shippedAt || order.createdAt).toLocaleString()}</p>
                     </div>
                 )}
 
