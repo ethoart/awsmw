@@ -14,11 +14,11 @@ interface ShippingPipelineProps {
 }
 
 export const ShippingPipeline: React.FC<ShippingPipelineProps> = ({ tenantId, shopName, onSelectOrder }) => {
-  const [activeFilter, setActiveFilter] = useState<OrderStatus | 'ALL' | 'TODAY_SHIPPED'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<OrderStatus | 'LOGISTICS_ALL' | 'TODAY_SHIPPED'>('LOGISTICS_ALL');
   const [refreshKey, setRefreshKey] = useState(0);
 
   const filters = [
-    { label: 'ALL LOGISTICS', status: 'ALL', icon: <ListFilter size={14} /> },
+    { label: 'ALL LOGISTICS', status: 'LOGISTICS_ALL', icon: <ListFilter size={14} /> },
     { label: 'TODAY DISPATCHED', status: 'TODAY_SHIPPED', icon: <Calendar size={14} /> },
     { label: 'SHIPPED', status: OrderStatus.SHIPPED, icon: <Truck size={14} /> },
     { label: 'TRANSFER', status: OrderStatus.TRANSFER, icon: <ArrowRightLeft size={14} /> }, 
@@ -97,7 +97,7 @@ export const ShippingPipeline: React.FC<ShippingPipelineProps> = ({ tenantId, sh
           key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
-          status={activeFilter}
+          status={activeFilter as any}
           logisticsOnly={true} 
           onBulkAction={handleBulkPrint}
         />

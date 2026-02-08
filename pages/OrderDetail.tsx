@@ -243,21 +243,20 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     }
   };
 
-  // Improved Button Logic to handle active/neutral/dull states correctly
+  // UPDATED: Buttons keep their color always. Active status gets a visual boost (ring/scale).
   const getActionBtnClass = (targetStatus: OrderStatus, activeClass: string) => {
       const isActive = order?.status === targetStatus;
-      const isNeutral = order?.status === OrderStatus.OPEN_LEAD || order?.status === OrderStatus.PENDING;
       
-      // If active, show full color and highlight
+      // Base styles for all buttons (keep them colorful/visible)
+      let baseStyle = `${activeClass} hover:opacity-90`;
+
       if (isActive) {
-          return `${activeClass} ring-4 ring-offset-2 ring-slate-200 shadow-xl scale-105 opacity-100`;
+          // Extra prominence for the selected status
+          return `${baseStyle} ring-4 ring-offset-2 ring-slate-200 shadow-xl scale-105 opacity-100 font-extrabold`;
       }
-      // If neutral (Open Lead), allow buttons to be semi-prominent (inviting action)
-      if (isNeutral) {
-          return `${activeClass.replace('bg-', 'bg-opacity-90 hover:bg-opacity-100 ')}`;
-      }
-      // If another status is active, make this button dull/grayscale
-      return `bg-slate-50 text-slate-300 border border-slate-100 opacity-60 hover:opacity-100 hover:bg-slate-100 hover:text-slate-500 grayscale transition-all`;
+      
+      // Default state - still colorful, just normal weight/size
+      return `${baseStyle} opacity-80 hover:scale-105 transition-all`;
   };
 
   if (loading || !order) return <div className="p-20 text-center font-black uppercase text-slate-300">Synchronizing...</div>;

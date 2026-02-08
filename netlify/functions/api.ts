@@ -297,6 +297,16 @@ export const handler: Handler = async (event, context) => {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             query.shippedAt = { $gte: today.toISOString() };
+          } else if (status === 'LOGISTICS_ALL') {
+            // New Filter: Only show active logistic statuses (excluding pipeline)
+            query.status = { 
+                $in: [
+                    'SHIPPED', 'DELIVERY', 'DELIVERED', 
+                    'TRANSFER', 'RETURNED', 'RETURN_TRANSFER', 
+                    'RETURN_HANDOVER', 'RETURN_COMPLETED', 
+                    'RETURN_AS_ON_SYSTEM', 'RESIDUAL', 'REARRANGE'
+                ] 
+            };
           } else {
             query.status = status;
           }

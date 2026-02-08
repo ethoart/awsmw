@@ -23,25 +23,15 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   RefreshCw,
-  BarChart3
+  BarChart3,
+  LayoutDashboard
 } from 'lucide-react';
-import { formatCurrency } from '../utils/helpers';
+import { formatCurrency, formatFullNumber } from '../utils/helpers';
 
 interface StockProps {
   tenantId: string;
   shopName: string;
 }
-
-type StockHistoryItem = {
-    id: string;
-    date: string;
-    type: 'IN' | 'OUT' | 'RESTOCK';
-    productName: string;
-    sku: string;
-    quantity: number;
-    reference: string;
-    user?: string;
-};
 
 export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
   const [view, setView] = useState<'LIVE' | 'HISTORY'>('LIVE');
@@ -62,8 +52,8 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
       setProducts(prodData);
       
       if (view === 'HISTORY') {
-          // Fetch recent orders for history derivation
-          const orderData = await db.getOrders({ tenantId, limit: 2000 });
+          // Fetch larger sample for accurate history aggregation
+          const orderData = await db.getOrders({ tenantId, limit: 10000 });
           setOrders(orderData.data || []);
       }
     } catch (e) {
@@ -75,48 +65,35 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const historyData = useMemo(() => {
+  const aggregatedHistory = useMemo(() => {
       if (view !== 'HISTORY') return [];
-      const history: StockHistoryItem[] = [];
-
-      // 1. Stock IN (Batches)
-      products.forEach(p => {
-          (p.batches || []).forEach(b => {
-              history.push({
-                  id: b.id,
-                  date: b.createdAt,
-                  type: b.isReturn ? 'RESTOCK' : 'IN',
-                  productName: p.name,
-                  sku: p.sku,
-                  quantity: b.originalQuantity || b.quantity, 
-                  reference: b.isReturn ? 'Return Restock' : 'New Batch',
-              });
-          });
-      });
-
-      // 2. Stock OUT (Orders)
-      const deductStatuses = [OrderStatus.CONFIRMED, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.TRANSFER, OrderStatus.RETURNED]; 
       
-      orders.forEach(o => {
-          if (deductStatuses.includes(o.status)) {
-              o.items.forEach(item => {
-                  const pRef = products.find(p => p.id === item.productId);
-                  history.push({
-                      id: `${o.id}-${item.productId}`,
-                      date: o.confirmedAt || o.createdAt, // Use confirmation time as deduction time, fallback to creation
-                      type: 'OUT',
-                      productName: item.name,
-                      sku: pRef?.sku || 'UNKNOWN',
-                      quantity: item.quantity,
-                      reference: `Order #${o.id.slice(-6)}`,
-                      user: o.logs?.find(l => l.message.includes('CONFIRMED'))?.user || 'System'
-                  });
-              });
-          }
+      const stats: Record<string, { 
+          id: string, 
+          name: string, 
+          sku: string, 
+          totalAdded: number, 
+          remaining: number, 
+          sold: number 
+      }> = {};
+
+      // Initialize with products and batches
+      products.forEach(p => {
+          const totalAdded = (p.batches || []).reduce((sum, b) => sum + (b.originalQuantity ?? b.quantity), 0);
+          const currentRemaining = (p.batches || []).reduce((sum, b) => sum + b.quantity, 0);
+          
+          stats[p.id] = {
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              totalAdded,
+              remaining: currentRemaining,
+              sold: totalAdded - currentRemaining // Calculated derived sold count based on batch depletion
+          };
       });
 
-      return history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [products, orders, view]);
+      return Object.values(stats).sort((a,b) => b.totalAdded - a.totalAdded);
+  }, [products, view]);
 
   const handleAddProduct = async () => {
     if (!newProd.name || !newProd.sku) return alert("System Error: SKU and Identity Name required.");
@@ -212,7 +189,7 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                     onClick={() => setView('HISTORY')} 
                     className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'HISTORY' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                    Movement History
+                    History Summary
                 </button>
             </div>
             <button 
@@ -396,74 +373,36 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
           </div>
         </>
       ) : (
-        <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[600px]">
-            {loading ? (
-                <div className="p-20 text-center text-[10px] font-black uppercase tracking-[0.5em] text-slate-300">Generating Timeline...</div>
-            ) : (
-                <div className="flex-1 overflow-auto no-scrollbar">
-                    <table className="w-full text-left compact-table">
-                        <thead className="sticky top-0 bg-white z-10 border-b border-slate-100">
-                            <tr className="bg-slate-50/50">
-                                <th>Timestamp</th>
-                                <th className="text-center">Event Type</th>
-                                <th>Product SKU</th>
-                                <th className="text-right">Qty</th>
-                                <th>Reference</th>
-                                <th className="text-right pr-8">User/System</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                            {historyData.length === 0 && (
-                                <tr><td colSpan={6} className="py-20 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest">No Movements Recorded</td></tr>
-                            )}
-                            {historyData.map((h, i) => (
-                                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                                    <td className="py-4">
-                                        <div className="flex flex-col">
-                                            <span className="text-[11px] font-black text-slate-900">{new Date(h.date).toLocaleDateString()}</span>
-                                            <span className="text-[9px] font-bold text-slate-400">{new Date(h.date).toLocaleTimeString()}</span>
-                                        </div>
-                                    </td>
-                                    <td className="text-center py-4">
-                                        <div className="flex justify-center">
-                                            {h.type === 'IN' ? (
-                                                <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
-                                                    <ArrowDownLeft size={10} /> New Batch
-                                                </span>
-                                            ) : h.type === 'RESTOCK' ? (
-                                                <span className="bg-blue-50 text-blue-600 border border-blue-100 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
-                                                    <History size={10} /> Restock
-                                                </span>
-                                            ) : (
-                                                <span className="bg-rose-50 text-rose-600 border border-rose-100 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
-                                                    <ArrowUpRight size={10} /> Deduction
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="py-4">
-                                        <div className="flex flex-col">
-                                            <span className="text-[11px] font-black text-slate-900 uppercase">{h.productName}</span>
-                                            <span className="text-[9px] font-mono font-bold text-slate-400">{h.sku}</span>
-                                        </div>
-                                    </td>
-                                    <td className="text-right py-4">
-                                        <span className={`text-[12px] font-black ${h.type === 'OUT' ? 'text-rose-600' : 'text-emerald-600'}`}>
-                                            {h.type === 'OUT' ? '-' : '+'}{h.quantity}
-                                        </span>
-                                    </td>
-                                    <td className="py-4">
-                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">{h.reference}</span>
-                                    </td>
-                                    <td className="text-right pr-8 py-4">
-                                        <span className="text-[9px] font-black text-slate-400 uppercase bg-slate-50 px-2 py-1 rounded-md">{h.user || 'System'}</span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-slide-in">
+            {aggregatedHistory.length === 0 && (
+                <div className="col-span-full py-20 text-center flex flex-col items-center opacity-30">
+                    <LayoutDashboard size={64} className="mb-4 text-slate-300"/>
+                    <p className="text-[12px] font-black text-slate-400 uppercase tracking-[0.4em]">No Movement Data</p>
                 </div>
             )}
+            {aggregatedHistory.map((stat) => (
+                <div key={stat.id} className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col justify-between hover:border-blue-200 transition-all group">
+                    <div>
+                        <h4 className="text-lg font-black text-slate-900 uppercase tracking-tight">{stat.name}</h4>
+                        <p className="text-[10px] font-mono font-bold text-blue-500 mt-1">SKU: {stat.sku}</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-2 mt-8">
+                        <div className="bg-slate-50 p-4 rounded-2xl text-center">
+                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Added</p>
+                            <p className="text-xl font-black text-slate-900">{formatFullNumber(stat.totalAdded, 0)}</p>
+                        </div>
+                        <div className="bg-emerald-50 p-4 rounded-2xl text-center">
+                            <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-1">Sold/Sent</p>
+                            <p className="text-xl font-black text-emerald-600">{formatFullNumber(stat.sold, 0)}</p>
+                        </div>
+                        <div className="bg-blue-50 p-4 rounded-2xl text-center border-2 border-blue-100">
+                            <p className="text-[8px] font-black text-blue-600 uppercase tracking-widest mb-1">In Stock</p>
+                            <p className="text-xl font-black text-blue-600">{formatFullNumber(stat.remaining, 0)}</p>
+                        </div>
+                    </div>
+                </div>
+            ))}
         </div>
       )}
     </div>
