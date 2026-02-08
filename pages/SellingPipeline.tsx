@@ -20,8 +20,8 @@ export const SellingPipeline: React.FC<SellingPipelineProps> = ({ tenantId, shop
 
   useEffect(() => { 
     db.getProducts(tenantId).then(setProducts); 
-    // Fetch a sample for count calculation
-    db.getOrders({ tenantId, limit: 1000 }).then(res => setOrders(res.data || []));
+    // Fetch a larger sample for count calculation to ensure accuracy
+    db.getOrders({ tenantId, limit: 10000 }).then(res => setOrders(res.data || []));
   }, [tenantId, refreshKey]);
 
   const counts = useMemo(() => {

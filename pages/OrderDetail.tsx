@@ -64,7 +64,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
         setTenant(fetchedTenant || null);
         db.getCustomerDetailedHistory(data.customerPhone, tenantId).then(h => setCustomerHistory(h.filter(x => x.id !== orderId))).catch(() => {});
 
-        const initialCity = data.customerCity || ''; // No default fallback, must be explicit
+        const initialCity = data.customerCity || ''; 
         setCitySearch(initialCity);
 
         let dateVal = '';
@@ -153,7 +153,6 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     }
 
     if (newStatus === OrderStatus.SHIPPED) {
-      // PREVENT DOUBLE SHIPPING & SHIP ONLY CONFIRMED
       if (order.status === OrderStatus.SHIPPED) return alert("System Warning: This lead has already been dispatched.");
       if (order.status !== OrderStatus.CONFIRMED) return alert("System Warning: Only CONFIRMED orders can be dispatched to logistics.");
 
@@ -169,8 +168,27 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
     }
     
     setIsSaving(true);
+    
+    const timestampUpdates: Partial<Order> = {};
+    if (newStatus === OrderStatus.CONFIRMED && !order.confirmedAt) {
+        timestampUpdates.confirmedAt = new Date().toISOString();
+    }
+    if (newStatus === OrderStatus.DELIVERED && !order.deliveredAt) {
+        timestampUpdates.deliveredAt = new Date().toISOString();
+    }
+
     const log: OrderLog = { id: `l-${Date.now()}`, message: `Status Protocol: Order transitioned to ${newStatus}`, timestamp: new Date().toISOString(), user };
-    await db.updateOrder({ ...order, ...localFormData, items, totalAmount, status: newStatus, logs: [...(order.logs || []), log] });
+    
+    await db.updateOrder({ 
+        ...order, 
+        ...localFormData, 
+        ...timestampUpdates,
+        items, 
+        totalAmount, 
+        status: newStatus, 
+        logs: [...(order.logs || []), log] 
+    });
+    
     setIsSaving(false);
     
     if (newStatus === OrderStatus.OPEN_LEAD) {
@@ -430,7 +448,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                                 <div className="flex-1">
                                     <div className="flex justify-between items-center mb-1">
                                         <span className="text-[9px] font-black text-slate-900 uppercase">{log.user}</span>
-                                        <span className="text-[8px] font-bold text-slate-400">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                        <span className="text-[8px] font-bold text-slate-400">{new Date(log.timestamp).toLocaleString()}</span>
                                     </div>
                                     <p className="text-[11px] font-bold text-slate-600 uppercase tracking-tight leading-relaxed">{log.message}</p>
                                 </div>

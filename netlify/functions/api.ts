@@ -195,7 +195,7 @@ export const handler: Handler = async (event, context) => {
                             {
                                 $set: { status: newStatus, courierStatus: statusRaw },
                                 $push: { logs: { id: `l-${Date.now()}`, message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`, timestamp: new Date().toISOString(), user: 'Courier System' }}
-                            }
+                            } as any
                         );
                     }
                     return { statusCode: 200, headers, body: 'Success' };

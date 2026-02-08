@@ -123,20 +123,68 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     (orders || []).forEach(o => {
         const createDate = getSLDateString(new Date(o.createdAt));
         const shipDate = o.shippedAt ? getSLDateString(new Date(o.shippedAt)) : null;
-        const isInRange = createDate >= startDate && createDate <= endDate;
+        const confirmDate = o.confirmedAt ? getSLDateString(new Date(o.confirmedAt)) : null;
+        const deliverDate = o.deliveredAt ? getSLDateString(new Date(o.deliveredAt)) : null;
+
+        // ACTIVITY RANGES
+        const createIsInRange = createDate >= startDate && createDate <= endDate;
         const shipIsInRange = shipDate && shipDate >= startDate && shipDate <= endDate;
+        const confirmIsInRange = confirmDate && confirmDate >= startDate && confirmDate <= endDate;
+        const deliverIsInRange = deliverDate && deliverDate >= startDate && deliverDate <= endDate;
         
+        // TODAY SNAPSHOT
         if (createDate === today) todayOrders++;
         if (shipDate === today) todayShippedCount++;
-        if (o.status === OrderStatus.DELIVERED && shipDate === today) todayRevenue += o.totalAmount;
+        // Use deliveredAt for revenue if available, otherwise shipDate & status check
+        if ((o.status === OrderStatus.DELIVERED && (deliverDate === today || (!deliverDate && shipDate === today)))) {
+            todayRevenue += o.totalAmount;
+        }
         if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturnsCount++;
 
-        // Value Mapping based on Status in current range
-        if (isInRange) {
-          if (o.status === OrderStatus.CONFIRMED) {
+        // CONFIRMED STATS (Based on Confirmation Date)
+        if (confirmIsInRange) {
             confirmedCount++;
             confirmedValue += o.totalAmount;
-          }
+            o.items.forEach(item => {
+                if (productStats[item.productId]) productStats[item.productId].confirmed += item.quantity;
+            });
+        } else if (!o.confirmedAt && createIsInRange && o.status === OrderStatus.CONFIRMED) {
+            // Fallback for old orders without confirmedAt: use createdAt if current status is CONFIRMED
+            confirmedCount++;
+            confirmedValue += o.totalAmount;
+            o.items.forEach(item => {
+                if (productStats[item.productId]) productStats[item.productId].confirmed += item.quantity;
+            });
+        }
+
+        // DELIVERED STATS (Based on Delivery Date or Shipping Date fallback)
+        if (deliverIsInRange) {
+            deliveredCount++;
+            deliveredValue += o.totalAmount;
+            // Revenue Map
+            if (dailyMap[deliverDate!]) dailyMap[deliverDate!].sales += o.totalAmount;
+        } else if (!o.deliveredAt && o.status === OrderStatus.DELIVERED && shipIsInRange) {
+            // Fallback: If delivered but no date, count if shipped in range
+            deliveredCount++;
+            deliveredValue += o.totalAmount;
+            if (dailyMap[shipDate!]) dailyMap[shipDate!].sales += o.totalAmount;
+        }
+
+        // SHIPPED STATS (Based on Shipped Date)
+        if (shipIsInRange) {
+          shippedCount++;
+          shippedValue += o.totalAmount;
+          
+          o.items.forEach(item => {
+            filteredShippedProducts[item.name] = (filteredShippedProducts[item.name] || 0) + item.quantity;
+            if (productStats[item.productId]) {
+              productStats[item.productId].shipped += item.quantity;
+            }
+          });
+        }
+
+        // CREATED STATS (Leads/Sales Count based on Creation)
+        if (createIsInRange) {
           if (o.status === OrderStatus.RETURN_COMPLETED) {
             restockCount++;
             restockValue += o.totalAmount;
@@ -149,13 +197,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           o.items.forEach(item => {
             if (productStats[item.productId]) {
               productStats[item.productId].salesCount += item.quantity;
-              if (o.status === OrderStatus.CONFIRMED) productStats[item.productId].confirmed += item.quantity;
               if (o.status === OrderStatus.RETURNED || o.status === OrderStatus.RETURN_COMPLETED) productStats[item.productId].returned += item.quantity;
             }
           });
         }
 
-        if (isInRange && o.status === OrderStatus.RETURN_COMPLETED) {
+        if (createIsInRange && o.status === OrderStatus.RETURN_COMPLETED) {
           o.items.forEach(item => {
             if (!scannedReturnProducts[item.name]) {
               scannedReturnProducts[item.name] = { count: 0, sku: '' };
@@ -166,32 +213,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           });
         }
 
-        if (shipIsInRange) {
-          shippedCount++;
-          shippedValue += o.totalAmount;
-          
-          o.items.forEach(item => {
-            filteredShippedProducts[item.name] = (filteredShippedProducts[item.name] || 0) + item.quantity;
-            if (productStats[item.productId]) {
-              productStats[item.productId].shipped += item.quantity;
-            }
-          });
-          
-          if (o.status === OrderStatus.DELIVERED) {
-            deliveredCount++;
-            deliveredValue += o.totalAmount;
-            if (dailyMap[shipDate]) dailyMap[shipDate].sales += o.totalAmount;
-            
-            o.items.forEach(item => { 
-                if(productStats[item.productId]) {
-                    productStats[item.productId].delivered += item.quantity;
-                    productStats[item.productId].revenue += (item.price * item.quantity);
-                    const prodRef = products.find(pr => pr.id === item.productId);
-                    const avgCost = prodRef?.batches?.reduce((acc, b) => acc + b.buyingPrice, 0) / (prodRef?.batches?.length || 1) || 0;
-                    productStats[item.productId].profit += ((item.price - avgCost) * item.quantity);
-                }
-            });
-          }
+        // Product Profit Calculations (Using Delivery Status Logic)
+        if (o.status === OrderStatus.DELIVERED) {
+             const isRelevant = deliverDate ? deliverIsInRange : shipIsInRange;
+             if (isRelevant) {
+                o.items.forEach(item => { 
+                    if(productStats[item.productId]) {
+                        productStats[item.productId].delivered += item.quantity;
+                        productStats[item.productId].revenue += (item.price * item.quantity);
+                        const prodRef = products.find(pr => pr.id === item.productId);
+                        const avgCost = prodRef?.batches?.reduce((acc, b) => acc + b.buyingPrice, 0) / (prodRef?.batches?.length || 1) || 0;
+                        productStats[item.productId].profit += ((item.price - avgCost) * item.quantity);
+                    }
+                });
+             }
         }
 
         if (o.logs) {

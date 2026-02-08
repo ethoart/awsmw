@@ -114,6 +114,7 @@ export interface Order {
   createdAt: string;
   confirmedAt?: string;
   shippedAt?: string; 
+  deliveredAt?: string;
   trackingNumber?: string;
   courierStatus?: string;
   isPrinted: boolean;
