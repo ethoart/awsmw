@@ -8,7 +8,7 @@ import {
   Archive, Calendar, Star, Activity, Box,
   Award, ListChecks, ArrowUpRight, LayoutDashboard,
   Target, ClipboardList, RotateCw, PackageCheck,
-  Coins, ShieldCheck
+  Coins, ShieldCheck, Layers, TrendingUp, Wallet
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, 
@@ -77,6 +77,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     let shippedValue = 0;
     let restockValue = 0;
 
+    // INVENTORY METRICS
+    let inventoryTotalCount = 0;
+    let inventoryCostValue = 0;
+    let inventoryRetailValue = 0;
+
     const today = getSLDateString();
     let todayOrders = 0;
     let todayRevenue = 0;
@@ -97,7 +102,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
       openLeads: number;
     } } = {};
 
+    // Process Inventory Data
     (products || []).forEach(p => {
+      let pStock = 0;
+      (p.batches || []).forEach(b => {
+          pStock += b.quantity;
+          inventoryCostValue += (b.quantity * b.buyingPrice);
+      });
+      inventoryTotalCount += pStock;
+      inventoryRetailValue += (pStock * p.price);
+
       productStats[p.id] = { 
         sku: p.sku, name: p.name, salesCount: 0, confirmed: 0, 
         shipped: 0, delivered: 0, returned: 0, revenue: 0, profit: 0 
@@ -240,19 +254,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             });
 
             // 2. Outcomes: Attribute based on CURRENT status + LATEST relevant log in range.
-            // This prevents double counting on reversals (e.g., Confirm -> Open Lead -> Confirm only counts 1 if currently confirmed, or 0 if currently Open Lead).
-            
             const findLatestLogUserInRange = (statusKeyword: string) => {
-                // Iterate backwards to find latest action
                 for (let i = (o.logs?.length || 0) - 1; i >= 0; i--) {
                     const log = o.logs![i];
                     if (log.message.toUpperCase().includes(statusKeyword)) {
                         const logDate = getSLDateString(new Date(log.timestamp));
-                        // Only credit if the decisive action happened in this period
                         if (logDate >= startDate && logDate <= endDate) {
                             return log.user;
                         }
-                        return null; // Found latest action, but out of range -> no credit for this period
+                        return null; 
                     }
                 }
                 return null;
@@ -265,25 +275,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                 OrderStatus.RETURN_AS_ON_SYSTEM, OrderStatus.RETURN_HANDOVER, OrderStatus.RETURN_COMPLETED
             ];
 
-            // CONFIRMS
             if (confirmedLikeStatuses.includes(o.status)) {
                 const user = findLatestLogUserInRange('CONFIRMED');
                 if (user && teamStats[user]) teamStats[user].confirms++;
             }
 
-            // REJECTS
             if (o.status === OrderStatus.REJECTED) {
                 const user = findLatestLogUserInRange('REJECTED');
                 if (user && teamStats[user]) teamStats[user].rejects++;
             }
 
-            // NO ANSWERS
             if (o.status === OrderStatus.NO_ANSWER) {
                 const user = findLatestLogUserInRange('NO_ANSWER');
                 if (user && teamStats[user]) teamStats[user].noAnswers++;
             }
 
-            // OPEN LEADS (Resets)
             if (o.status === OrderStatus.OPEN_LEAD) {
                 const user = findLatestLogUserInRange('OPEN_LEAD');
                 if (user && teamStats[user]) teamStats[user].openLeads++;
@@ -298,6 +304,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           confirmedCount, confirmedValue,
           shippedCount, shippedValue,
           restockCount, restockValue
+        },
+        inventory: {
+            count: inventoryTotalCount,
+            cost: inventoryCostValue,
+            retail: inventoryRetailValue
         },
         today: { todayOrders, todayRevenue, todayShippedCount, todayReturnsCount },
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
@@ -363,6 +374,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                 </div>
             </div>
           ))}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden border border-white/5 group">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/20 blur-[60px] -translate-y-1/2 translate-x-1/2"></div>
+              <div className="relative z-10">
+                  <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center mb-6">
+                      <Layers size={24} className="text-blue-400" />
+                  </div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Total Remaining Stock</p>
+                  <h3 className="text-5xl font-black tracking-tighter text-white">{formatFullNumber(dashboardData.inventory.count, 0)}</h3>
+                  <p className="text-[10px] font-bold text-blue-400 uppercase mt-2 tracking-widest">Units Available</p>
+              </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-all">
+              <div className="relative z-10">
+                  <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6">
+                      <TrendingUp size={24} />
+                  </div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Potential Retail Value</p>
+                  <h3 className="text-4xl font-black tracking-tighter text-slate-900">{formatCurrency(dashboardData.inventory.retail)}</h3>
+                  <p className="text-[10px] font-bold text-emerald-600 uppercase mt-2 tracking-widest">Projected Revenue</p>
+              </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-all">
+              <div className="relative z-10">
+                  <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6">
+                      <Wallet size={24} />
+                  </div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Inventory Asset Value</p>
+                  <h3 className="text-4xl font-black tracking-tighter text-slate-900">{formatCurrency(dashboardData.inventory.cost)}</h3>
+                  <p className="text-[10px] font-bold text-indigo-600 uppercase mt-2 tracking-widest">Capital Invested</p>
+              </div>
+          </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

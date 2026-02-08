@@ -17,7 +17,7 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    db.getOrders(tenantId).then(res => setOrders(res.data || []));
+    db.getOrders({ tenantId, limit: 10000 }).then(res => setOrders(res.data || []));
   }, [tenantId, refreshKey]);
 
   const counts = useMemo(() => {

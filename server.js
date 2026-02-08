@@ -220,6 +220,15 @@ app.get('/api/orders', async (req, res) => {
             if (status === 'TODAY_SHIPPED') {
                 const dateToMatch = startDate || new Date().toISOString().split('T')[0];
                 query.shippedAt = { $regex: `^${dateToMatch}` };
+            } else if (status === 'LOGISTICS_ALL') {
+                query.status = { 
+                    $in: [
+                        'SHIPPED', 'DELIVERY', 'DELIVERED', 
+                        'TRANSFER', 'RETURNED', 'RETURN_TRANSFER', 
+                        'RETURN_HANDOVER', 'RETURN_COMPLETED', 
+                        'RETURN_AS_ON_SYSTEM', 'RESIDUAL', 'REARRANGE'
+                    ] 
+                };
             } else {
                 query.status = status;
             }

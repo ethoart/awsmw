@@ -20,7 +20,7 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
   const scanRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    const fetched = await db.getOrders(tenantId);
+    const fetched = await db.getOrders({ tenantId, limit: 10000 });
     setOrders(fetched.data || []);
   };
 
