@@ -150,12 +150,13 @@ class BackendService {
         }
     }
 
-    // Filter out completely consumed batches to keep DB lean
-    const finalBatches = updatedBatches.filter(b => b.quantity > 0);
+    // IMPORTANT: Do NOT filter out zero quantity batches.
+    // Keeping them ensures 'originalQuantity' is preserved for history calculations.
+    // The UI will filter them out for 'Live Stock' view.
     
     await this.updateProduct({
         ...product,
-        batches: finalBatches
+        batches: updatedBatches
     });
   }
 

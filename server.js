@@ -336,29 +336,34 @@ app.post('/api/process-return', async (req, res) => {
         const order = await ordersCol.findOne({ $or: [{ id: trackingOrId }, { trackingNumber: trackingOrId }] });
         
         if (order) {
-            if (order.status !== 'RETURN_COMPLETED') {
-                for (const item of order.items) {
-                    const product = await prodCol.findOne({ id: item.productId });
-                    if (product) {
-                        const batches = product.batches || [];
-                        const returnBatch = {
-                            id: `rb-${Date.now()}`,
-                            quantity: item.quantity,
-                            buyingPrice: item.price * 0.7,
-                            createdAt: new Date().toISOString(),
-                            isReturn: true
-                        };
-                        await prodCol.updateOne(
-                            { id: item.productId },
-                            { $push: { batches: returnBatch } }
-                        );
-                    }
+            // CHECK IF ALREADY PROCESSED
+            if (order.status === 'RETURN_COMPLETED') {
+                return res.json({ ...clean(order), alreadyProcessed: true });
+            }
+
+            // DEDUCT STOCK (Add back to inventory)
+            for (const item of order.items) {
+                const product = await prodCol.findOne({ id: item.productId });
+                if (product) {
+                    const batches = product.batches || [];
+                    const returnBatch = {
+                        id: `rb-${Date.now()}`,
+                        quantity: item.quantity,
+                        buyingPrice: item.price * 0.7,
+                        createdAt: new Date().toISOString(),
+                        isReturn: true
+                    };
+                    await prodCol.updateOne(
+                        { id: item.productId },
+                        { $push: { batches: returnBatch } }
+                    );
                 }
             }
 
             const updated = { 
                 ...order, 
                 status: 'RETURN_COMPLETED',
+                returnCompletedAt: new Date().toISOString(), // TIMESTAMP ADDED
                 logs: [...(order.logs || []), { id: `rl-${Date.now()}`, message: 'Return Processed: Stock Restored to Registry', timestamp: new Date().toISOString(), user: 'OMS Scanner' }]
             };
             await ordersCol.updateOne({ id: order.id }, { $set: clean(updated) });
@@ -456,10 +461,17 @@ async function handleWebhookUpdate(waybill_id, statusRaw, lastUpdate, res) {
                 const newStatus = mapStatus(statusRaw);
                 
                 if (order.status !== newStatus) {
+                    const updateFields = { status: newStatus, courierStatus: statusRaw };
+                    
+                    // CRITICAL FIX: Automatically set deliveredAt if status becomes DELIVERED and wasn't set before
+                    if (newStatus === 'DELIVERED' && !order.deliveredAt) {
+                        updateFields.deliveredAt = lastUpdate || new Date().toISOString();
+                    }
+
                     await db.collection('orders').updateOne(
                         { id: order.id },
                         {
-                            $set: { status: newStatus, courierStatus: statusRaw },
+                            $set: updateFields,
                             $push: { logs: {
                                 id: `l-${Date.now()}`,
                                 message: `WEBHOOK: Status update to ${statusRaw} [Time: ${lastUpdate}]`,

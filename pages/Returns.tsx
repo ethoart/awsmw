@@ -16,7 +16,8 @@ import {
     PackageCheck, 
     Info,
     RotateCcw,
-    RefreshCcw
+    RefreshCcw,
+    AlertTriangle
 } from 'lucide-react';
 import { Order, OrderStatus } from '../types';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
@@ -35,6 +36,7 @@ export const Returns: React.FC<ReturnsProps> = ({ tenantId, shopName }) => {
   const [scanInput, setScanInput] = useState('');
   const [processedOrder, setProcessedOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [alreadyScanned, setAlreadyScanned] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   
@@ -120,15 +122,19 @@ export const Returns: React.FC<ReturnsProps> = ({ tenantId, shopName }) => {
     setIsProcessing(true);
     setError(null);
     setProcessedOrder(null);
+    setAlreadyScanned(false);
     
     const cleanCode = code.trim();
     if (!cleanCode) { setIsProcessing(false); return; }
     
     try {
-      let result: Order | null = null;
+      let result: any = null;
       
       if (operation === 'RETURN') {
           result = await db.processReturn(cleanCode, tenantId);
+          if (result && result.alreadyProcessed) {
+              setAlreadyScanned(true);
+          }
       } else if (operation === 'DISPATCH') {
           const order = await db.getOrder(cleanCode, tenantId);
           if (order) {
@@ -149,7 +155,11 @@ export const Returns: React.FC<ReturnsProps> = ({ tenantId, shopName }) => {
       if (result) { 
           setProcessedOrder(result); 
           setScanInput(''); 
-          try { new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3').play(); } catch(e){}
+          if (result.alreadyProcessed) {
+             try { new Audio('https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3').play(); } catch(e){}
+          } else {
+             try { new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3').play(); } catch(e){}
+          }
       } else { 
           setError(`Reference "${cleanCode}" not found in cluster registry.`); 
           setScanInput('');
@@ -192,7 +202,7 @@ export const Returns: React.FC<ReturnsProps> = ({ tenantId, shopName }) => {
             ].map(op => (
                 <button 
                     key={op.id}
-                    onClick={() => { setOperation(op.id as ScanOperation); setProcessedOrder(null); setError(null); }}
+                    onClick={() => { setOperation(op.id as ScanOperation); setProcessedOrder(null); setError(null); setAlreadyScanned(false); }}
                     className={`flex items-center gap-3 px-6 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm border border-slate-100 ${operation === op.id ? op.active : 'bg-white text-slate-400 ' + op.color}`}
                 >
                     {op.icon} {op.label}
@@ -282,16 +292,18 @@ export const Returns: React.FC<ReturnsProps> = ({ tenantId, shopName }) => {
 
         <div className="mt-10 min-h-[140px]">
             {processedOrder && (
-                <div className="bg-slate-50 border-2 border-slate-100 p-8 rounded-[3rem] animate-slide-in shadow-xl relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-2xl"></div>
+                <div className={`bg-slate-50 border-2 ${alreadyScanned ? 'border-amber-200 bg-amber-50' : 'border-slate-100'} p-8 rounded-[3rem] animate-slide-in shadow-xl relative overflow-hidden`}>
+                    <div className={`absolute top-0 right-0 w-32 h-32 ${alreadyScanned ? 'bg-amber-500/10' : 'bg-emerald-500/5'} blur-2xl`}></div>
                     <div className="flex flex-col md:flex-row items-center gap-8">
-                        <div className="w-20 h-20 bg-emerald-600 text-white rounded-[1.8rem] flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
-                            <ShieldCheck size={40} />
+                        <div className={`w-20 h-20 ${alreadyScanned ? 'bg-amber-500' : 'bg-emerald-600'} text-white rounded-[1.8rem] flex items-center justify-center shadow-lg shrink-0`}>
+                            {alreadyScanned ? <AlertTriangle size={40} /> : <ShieldCheck size={40} />}
                         </div>
                         <div className="flex-1 space-y-2 text-center md:text-left">
                             <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
                                 <h3 className="font-black uppercase text-2xl tracking-tighter text-slate-900">{processedOrder.customerName}</h3>
-                                <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[9px] font-black uppercase tracking-widest">SYNCED</span>
+                                <span className={`px-3 py-1 ${alreadyScanned ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'} rounded-lg text-[9px] font-black uppercase tracking-widest`}>
+                                    {alreadyScanned ? 'ALREADY SCANNED' : 'SYNCED'}
+                                </span>
                             </div>
                             <div className="flex flex-wrap justify-center md:justify-start gap-4 text-[11px] font-black uppercase text-slate-400">
                                 <span>Ref: {processedOrder.id.slice(-8)}</span>

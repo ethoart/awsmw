@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { Order, OrderStatus } from '../types';
 import { OrderList } from './OrderList';
-import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw } from 'lucide-react';
+import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw, Calendar, AlertTriangle } from 'lucide-react';
+import { getSLDateString } from '../utils/helpers';
 
 interface ReturnManagementProps {
   tenantId: string;
@@ -18,6 +19,13 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
   const [refreshKey, setRefreshKey] = useState(0);
   const [orders, setOrders] = useState<Order[]>([]);
   const scanRef = useRef<HTMLInputElement>(null);
+  
+  // Date Filters
+  const [startDate, setStartDate] = useState(getSLDateString());
+  const [endDate, setEndDate] = useState(getSLDateString());
+
+  // Scan Feedback
+  const [scanResult, setScanResult] = useState<{ msg: string, type: 'success' | 'warning' | 'error' } | null>(null);
 
   const load = async () => {
     const fetched = await db.getOrders({ tenantId, limit: 10000 });
@@ -36,19 +44,44 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
     e.preventDefault();
     if (!scanInput.trim() || isProcessing) return;
     setIsProcessing(true);
+    setScanResult(null);
     try {
-      const result = await db.processReturn(scanInput, tenantId);
+      const result: any = await db.processReturn(scanInput, tenantId);
       if (result) {
-        alert(`Success: ${result.customerName} Order Restocked and Completed.`);
-        setRefreshKey(prev => prev + 1);
+        if (result.alreadyProcessed) {
+            setScanResult({ msg: `ALREADY SCANNED: ${result.customerName}`, type: 'warning' });
+            try { new Audio('https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3').play(); } catch(e){}
+        } else {
+            setScanResult({ msg: `SUCCESS: Restocked ${result.customerName}`, type: 'success' });
+            try { new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3').play(); } catch(e){}
+            setRefreshKey(prev => prev + 1);
+        }
         setScanInput('');
       } else {
-        alert("Reference Not Found: Ensure the tracking number or ID is correct.");
+        setScanResult({ msg: "REFERENCE NOT FOUND", type: 'error' });
       }
+    } catch(e) {
+        setScanResult({ msg: "SYSTEM ERROR", type: 'error' });
     } finally {
       setIsProcessing(false);
     }
   };
+
+  const filteredOrders = useMemo(() => {
+      return orders.filter(o => {
+          // Date Filter Logic
+          if (o.status === OrderStatus.RETURN_COMPLETED) {
+              // For completed returns, use the returnCompletedAt timestamp
+              const completedDate = o.returnCompletedAt ? getSLDateString(new Date(o.returnCompletedAt)) : getSLDateString(new Date(o.createdAt));
+              return completedDate >= startDate && completedDate <= endDate;
+          } else {
+              // For pending/other returns, usually we want to see them all, or filter by created/updated
+              // Here we filter by creation date to keep it consistent if user wants history
+              const createdDate = getSLDateString(new Date(o.createdAt));
+              return createdDate >= startDate && createdDate <= endDate;
+          }
+      });
+  }, [orders, startDate, endDate]);
 
   const counts = useMemo(() => {
     const stats = {
@@ -59,17 +92,17 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
       RETURN_HANDOVER: 0,
       RETURN_COMPLETED: 0
     };
-    if (Array.isArray(orders)) {
-      orders.forEach(o => {
+    
+    // Calculate counts based on filtered orders
+    filteredOrders.forEach(o => {
         const s = o.status as keyof typeof stats;
         if (stats[s] !== undefined) {
           stats[s]++;
           stats.ALL++;
         }
-      });
-    }
+    });
     return stats;
-  }, [orders]);
+  }, [filteredOrders]);
 
   const filters = [
     { label: 'ALL RETURNS', status: 'ALL', icon: <ListFilter size={14}/>, count: counts.ALL },
@@ -82,7 +115,7 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
 
   return (
     <div className="space-y-8 animate-slide-in max-w-[1400px] mx-auto pb-20">
-      <div className="flex flex-col md:flex-row justify-between items-center gap-6 px-2">
+      <div className="flex flex-col md:flex-row justify-between items-end gap-6 px-2">
         <div className="flex items-center gap-4">
           <div className="p-4 bg-blue-600 text-white rounded-[2rem] shadow-xl rotate-3">
             <RotateCcw size={28} />
@@ -93,7 +126,15 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
           </div>
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+            {/* Date Picker */}
+            <div className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-sm">
+                <Calendar size={14} className="text-blue-600" />
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+                <span className="text-[10px] font-black text-slate-300 mx-1">TO</span>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+            </div>
+
             <form onSubmit={handleScan} className="relative w-full md:w-80">
                 <input 
                     ref={scanRef}
@@ -114,6 +155,16 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
         </div>
       </div>
 
+      {scanResult && (
+          <div className={`mx-2 p-4 rounded-2xl flex items-center justify-center gap-3 font-black uppercase tracking-widest text-xs shadow-lg animate-bounce ${
+              scanResult.type === 'success' ? 'bg-emerald-500 text-white' : 
+              scanResult.type === 'warning' ? 'bg-amber-400 text-black' : 'bg-rose-600 text-white'
+          }`}>
+              {scanResult.type === 'warning' ? <AlertTriangle size={18}/> : scanResult.type === 'success' ? <CheckCircle size={18}/> : <AlertTriangle size={18}/>}
+              {scanResult.msg}
+          </div>
+      )}
+
       <div className="flex flex-wrap gap-2 bg-white p-2.5 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
         {filters.map(f => (
           <button
@@ -130,12 +181,18 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
       </div>
 
       <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm min-h-[600px] overflow-hidden">
+        {/* Pass filtered list explicitly? OrderList fetches internally. 
+            We need to pass filters to OrderList OR use a different approach.
+            OrderList accepts startDate and endDate. We can pass those.
+        */}
         <OrderList 
           key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
           status={activeFilter as any}
           logisticsOnly={true}
+          startDate={startDate}
+          endDate={endDate}
           onRefresh={() => setRefreshKey(prev => prev + 1)}
         />
       </div>

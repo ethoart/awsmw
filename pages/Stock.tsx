@@ -249,7 +249,7 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                                 <h4 className="text-xl font-black text-slate-900 tracking-tighter uppercase">{p.name}</h4>
                                 <div className="flex flex-wrap justify-center md:justify-start gap-4 mt-1">
                                     <span className="text-[10px] font-mono font-bold text-blue-600 uppercase">SKU: {p.sku}</span>
-                                    <span className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><History size={10}/> {p.batches.length} active batches</span>
+                                    <span className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><History size={10}/> {p.batches.length} total batches</span>
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-6 w-full md:w-auto">
@@ -280,12 +280,12 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                                     <div className="lg:col-span-7 space-y-4">
                                         <div className="flex items-center justify-between">
                                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                                <TrendingDown size={14} className="text-blue-500"/> Batch Registry (FIFO Order)
+                                                <TrendingDown size={14} className="text-blue-500"/> Batch Registry (Active Only)
                                             </h5>
-                                            <span className="text-[9px] font-bold text-slate-300 uppercase italic">Oldest units used first</span>
+                                            <span className="text-[9px] font-bold text-slate-300 uppercase italic">FIFO: Oldest first</span>
                                         </div>
                                         <div className="space-y-2">
-                                            {p.batches.map((batch, idx) => (
+                                            {p.batches.filter(b => b.quantity > 0).map((batch, idx) => (
                                                 <div key={batch.id} className={`flex items-center justify-between p-4 rounded-2xl border ${batch.id.startsWith('rb-') ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
                                                     <div className="flex items-center gap-4">
                                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black ${idx === 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-slate-500 border border-slate-200'}`}>
@@ -334,6 +334,11 @@ export const Stock: React.FC<StockProps> = ({ tenantId, shopName }) => {
                                                     </div>
                                                 </div>
                                             ))}
+                                            {p.batches.filter(b => b.quantity > 0).length === 0 && (
+                                                <div className="text-center py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">
+                                                    Stock Depleted
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 

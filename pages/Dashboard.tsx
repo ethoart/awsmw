@@ -87,6 +87,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
     let todayRevenue = 0;
     let todayShippedCount = 0;
     let todayReturnsCount = 0;
+    let todayDeliveredCount = 0;
 
     const filteredShippedProducts: { [name: string]: number } = {};
     const scannedReturnProducts: { [name: string]: { count: number, sku: string } } = {};
@@ -139,20 +140,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         const shipDate = o.shippedAt ? getSLDateString(new Date(o.shippedAt)) : null;
         const confirmDate = o.confirmedAt ? getSLDateString(new Date(o.confirmedAt)) : null;
         const deliverDate = o.deliveredAt ? getSLDateString(new Date(o.deliveredAt)) : null;
+        const returnCompletedDate = o.returnCompletedAt ? getSLDateString(new Date(o.returnCompletedAt)) : null;
 
         // ACTIVITY RANGES
         const createIsInRange = createDate >= startDate && createDate <= endDate;
         const shipIsInRange = shipDate && shipDate >= startDate && shipDate <= endDate;
         const confirmIsInRange = confirmDate && confirmDate >= startDate && confirmDate <= endDate;
         const deliverIsInRange = deliverDate && deliverDate >= startDate && deliverDate <= endDate;
+        const returnCompletedIsInRange = returnCompletedDate && returnCompletedDate >= startDate && returnCompletedDate <= endDate;
         
         // TODAY SNAPSHOT
         if (createDate === today) todayOrders++;
         if (shipDate === today) todayShippedCount++;
-        // Use deliveredAt for revenue if available, otherwise shipDate & status check
-        if ((o.status === OrderStatus.DELIVERED && (deliverDate === today || (!deliverDate && shipDate === today)))) {
-            todayRevenue += o.totalAmount;
+        
+        if (o.status === OrderStatus.DELIVERED) {
+            // Heuristic: If deliveredAt exists and matches today, count it.
+            // If deliveredAt is missing but it was shipped today, count it as delivered today (legacy fallback).
+            if (deliverDate === today || (!deliverDate && shipDate === today)) {
+                todayDeliveredCount++;
+                todayRevenue += o.totalAmount;
+            }
         }
+
         if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturnsCount++;
 
         // CONFIRMED STATS (Based on Confirmation Date)
@@ -197,12 +206,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           });
         }
 
+        // RESTOCK STATS (Using new returnCompletedAt timestamp or legacy creation date fallback)
+        if (o.status === OrderStatus.RETURN_COMPLETED) {
+             if (returnCompletedDate) {
+                 if (returnCompletedIsInRange) {
+                     restockCount++;
+                     restockValue += o.totalAmount;
+                 }
+             } else {
+                 // Fallback to creation date if timestamp missing (legacy data)
+                 if (createIsInRange) {
+                     restockCount++;
+                     restockValue += o.totalAmount;
+                 }
+             }
+        }
+
         // CREATED STATS (Leads/Sales Count based on Creation)
         if (createIsInRange) {
-          if (o.status === OrderStatus.RETURN_COMPLETED) {
-            restockCount++;
-            restockValue += o.totalAmount;
-          }
           if (o.status === OrderStatus.RETURNED || o.status === OrderStatus.REJECTED) {
             returnedCount++;
             returnedValue += o.totalAmount;
@@ -310,7 +331,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             cost: inventoryCostValue,
             retail: inventoryRetailValue
         },
-        today: { todayOrders, todayRevenue, todayShippedCount, todayReturnsCount },
+        today: { todayOrders, todayRevenue, todayShippedCount, todayReturnsCount, todayDeliveredCount },
         manifest: Object.entries(filteredShippedProducts).sort((a,b) => b[1] - a[1]),
         scannedReturnManifest: Object.entries(scannedReturnProducts).sort((a,b) => b[1].count - a[1].count),
         trends: Object.values(dailyMap),
@@ -470,14 +491,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-3 mb-8 relative z-10">
                 <Target size={18} className="text-blue-400"/> Operational Velocity
             </h3>
-            <div className="grid grid-cols-2 gap-4 relative z-10">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 relative z-10">
               {[
                   { label: "Today's Inbound", val: formatFullNumber(dashboardData.today.todayOrders, 0), icon: <Target className="text-blue-400" /> },
                   { label: "Today's Dispatch", val: formatFullNumber(dashboardData.today.todayShippedCount, 0), icon: <Truck className="text-amber-400" /> },
+                  { label: "Today's Delivered", val: formatFullNumber(dashboardData.today.todayDeliveredCount, 0), icon: <PackageCheck className="text-emerald-400" /> },
                   { label: "Today's Revenue", val: formatCurrency(dashboardData.today.todayRevenue), icon: <DollarSign className="text-emerald-400" /> },
                   { label: "Today's Returns", val: formatFullNumber(dashboardData.today.todayReturnsCount, 0), icon: <RotateCcw className="text-rose-400" /> },
               ].map((stat, i) => (
-                  <div key={i} className="bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group">
+                  <div key={i} className={`bg-white/5 border border-white/10 p-5 rounded-[2rem] hover:bg-white/10 transition-all group ${i >= 3 ? 'md:col-span-1.5' : ''}`}>
                       <div className="flex items-center gap-3 mb-2">
                           {React.cloneElement(stat.icon as any, { size: 14 })}
                           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
