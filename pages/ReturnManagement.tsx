@@ -4,7 +4,7 @@ import { db } from '../services/mockBackend';
 import { Order, OrderStatus } from '../types';
 import { OrderList } from './OrderList';
 import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw, Calendar, AlertTriangle } from 'lucide-react';
-import { getSLDateString } from '../utils/helpers';
+import { getSLDateString, getReturnCompletionDate } from '../utils/helpers';
 
 interface ReturnManagementProps {
   tenantId: string;
@@ -71,8 +71,9 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
       return orders.filter(o => {
           // Date Filter Logic
           if (o.status === OrderStatus.RETURN_COMPLETED) {
-              // For completed returns, use the returnCompletedAt timestamp
-              const completedDate = o.returnCompletedAt ? getSLDateString(new Date(o.returnCompletedAt)) : getSLDateString(new Date(o.createdAt));
+              // Use robust date helper to get the actual return completion date (from timestamp or logs)
+              const rawReturnDate = getReturnCompletionDate(o);
+              const completedDate = getSLDateString(new Date(rawReturnDate));
               return completedDate >= startDate && completedDate <= endDate;
           } else {
               // For pending/other returns, usually we want to see them all, or filter by created/updated

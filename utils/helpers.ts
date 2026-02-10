@@ -1,5 +1,5 @@
 
-import { CustomerStatus } from '../types';
+import { CustomerStatus, Order } from '../types';
 
 export const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-LK', {
@@ -29,6 +29,27 @@ export const getSLDateString = (date: Date = new Date()) => {
     month: '2-digit',
     day: '2-digit'
   }).format(date);
+};
+
+/**
+ * Robustly determines when a return was processed.
+ * 1. Checks `returnCompletedAt` (New Schema)
+ * 2. Checks `logs` for "Return Processed" message (Legacy with Logs)
+ * 3. Fallback to `createdAt` (Legacy without Logs - unlikely)
+ */
+export const getReturnCompletionDate = (order: Order): string => {
+    if (order.returnCompletedAt) return order.returnCompletedAt;
+    
+    if (order.logs && order.logs.length > 0) {
+        // Search logs for the specific return action
+        const returnLog = [...order.logs].reverse().find(l => 
+            l.message.includes('Return Processed') || 
+            l.message.includes('RETURN_COMPLETED')
+        );
+        if (returnLog) return returnLog.timestamp;
+    }
+    
+    return order.createdAt;
 };
 
 export const getCustomerStatusColor = (status: CustomerStatus) => {

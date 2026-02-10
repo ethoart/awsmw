@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Order, OrderStatus, Product, User } from '../types';
 import { db } from '../services/mockBackend';
-import { formatCurrency, formatFullNumber, getSLDateString } from '../utils/helpers';
+import { formatCurrency, formatFullNumber, getSLDateString, getReturnCompletionDate } from '../utils/helpers';
 import { 
   RefreshCcw, DollarSign, Truck, RotateCcw, 
   Archive, Calendar, Star, Activity, Box,
@@ -140,7 +140,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
         const shipDate = o.shippedAt ? getSLDateString(new Date(o.shippedAt)) : null;
         const confirmDate = o.confirmedAt ? getSLDateString(new Date(o.confirmedAt)) : null;
         const deliverDate = o.deliveredAt ? getSLDateString(new Date(o.deliveredAt)) : null;
-        const returnCompletedDate = o.returnCompletedAt ? getSLDateString(new Date(o.returnCompletedAt)) : null;
+        
+        // Calculate Return Date robustly using helper
+        const returnDateRaw = getReturnCompletionDate(o);
+        const returnCompletedDate = returnDateRaw ? getSLDateString(new Date(returnDateRaw)) : null;
 
         // ACTIVITY RANGES
         const createIsInRange = createDate >= startDate && createDate <= endDate;
@@ -162,7 +165,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
             }
         }
 
-        if (o.status === OrderStatus.RETURN_COMPLETED && createDate === today) todayReturnsCount++;
+        if (o.status === OrderStatus.RETURN_COMPLETED) {
+            // Use the robust return date for Today's Returns
+            if (returnCompletedDate === today) todayReturnsCount++;
+        }
 
         // CONFIRMED STATS (Based on Confirmation Date)
         if (confirmIsInRange) {
@@ -206,20 +212,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           });
         }
 
-        // RESTOCK STATS (Using new returnCompletedAt timestamp or legacy creation date fallback)
-        if (o.status === OrderStatus.RETURN_COMPLETED) {
-             if (returnCompletedDate) {
-                 if (returnCompletedIsInRange) {
-                     restockCount++;
-                     restockValue += o.totalAmount;
-                 }
-             } else {
-                 // Fallback to creation date if timestamp missing (legacy data)
-                 if (createIsInRange) {
-                     restockCount++;
-                     restockValue += o.totalAmount;
-                 }
-             }
+        // RESTOCK STATS (Using Robust Date Helper)
+        if (o.status === OrderStatus.RETURN_COMPLETED && returnCompletedIsInRange) {
+             restockCount++;
+             restockValue += o.totalAmount;
+
+             // Populate Scanned Return Manifest based on range
+             o.items.forEach(item => {
+                if (!scannedReturnProducts[item.name]) {
+                  scannedReturnProducts[item.name] = { count: 0, sku: '' };
+                  const pRef = products.find(p => p.id === item.productId);
+                  scannedReturnProducts[item.name].sku = pRef?.sku || 'N/A';
+                }
+                scannedReturnProducts[item.name].count += item.quantity;
+
+                // Update Product Stats Return Count (Activity Based)
+                if (productStats[item.productId]) {
+                    productStats[item.productId].returned += item.quantity;
+                }
+             });
         }
 
         // CREATED STATS (Leads/Sales Count based on Creation)
@@ -232,19 +243,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
           o.items.forEach(item => {
             if (productStats[item.productId]) {
               productStats[item.productId].salesCount += item.quantity;
-              if (o.status === OrderStatus.RETURNED || o.status === OrderStatus.RETURN_COMPLETED) productStats[item.productId].returned += item.quantity;
             }
-          });
-        }
-
-        if (createIsInRange && o.status === OrderStatus.RETURN_COMPLETED) {
-          o.items.forEach(item => {
-            if (!scannedReturnProducts[item.name]) {
-              scannedReturnProducts[item.name] = { count: 0, sku: '' };
-              const pRef = products.find(p => p.id === item.productId);
-              scannedReturnProducts[item.name].sku = pRef?.sku || 'N/A';
-            }
-            scannedReturnProducts[item.name].count += item.quantity;
           });
         }
 
@@ -587,7 +586,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                             <th className="text-center">Total Leads</th>
                             <th className="text-center">Confirmed</th>
                             <th className="text-center">Delivered</th>
-                            <th className="text-center">Returns</th>
+                            <th className="text-center">Restocked (Qty)</th>
                             <th className="text-right rounded-r-3xl pr-10">Net Profit (Est.)</th>
                         </tr>
                     </thead>
