@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/mockBackend';
-import { Order, OrderStatus } from '../types';
+import { Order, OrderStatus, Product } from '../types';
 import { OrderList } from './OrderList';
-import { PhoneForwarded, ListFilter, Pause, RefreshCcw, RefreshCw } from 'lucide-react';
+import { PhoneForwarded, ListFilter, Pause, RefreshCcw, RefreshCw, Box, ChevronDown, Calendar } from 'lucide-react';
+import { getSLDateString } from '../utils/helpers';
 
 interface ResidualManagementProps {
   tenantId: string;
@@ -14,11 +15,36 @@ interface ResidualManagementProps {
 export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId, shopName, onSelectOrder }) => {
   const [activeFilter, setActiveFilter] = useState<OrderStatus | 'ALL'>('ALL');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('ALL');
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Date Filters (Default to empty = ALL TIME for residuals usually, but allow filtering)
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
   useEffect(() => {
-    db.getOrders({ tenantId, limit: 10000 }).then(res => setOrders(res.data || []));
+    const fetchData = async () => {
+        const [fetchedOrders, fetchedProducts] = await Promise.all([
+            db.getOrders({ tenantId, limit: 10000 }),
+            db.getProducts(tenantId)
+        ]);
+        setOrders(fetchedOrders.data || []);
+        setProducts(fetchedProducts || []);
+    };
+    fetchData();
   }, [tenantId, refreshKey]);
+
+  const applyPreset = (preset: 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR') => {
+    const end = new Date();
+    const start = new Date();
+    if (preset === 'WEEK') start.setDate(end.getDate() - 7);
+    if (preset === 'MONTH') start.setMonth(end.getMonth() - 1);
+    if (preset === 'YEAR') start.setFullYear(end.getFullYear() - 1);
+    
+    setStartDate(getSLDateString(start));
+    setEndDate(getSLDateString(end));
+  };
 
   const counts = useMemo(() => {
     const stats = {
@@ -28,6 +54,14 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
     };
     if (Array.isArray(orders)) {
       orders.forEach(o => {
+        // Product Filter
+        if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return;
+        
+        // Date Filter (using CreatedAt)
+        const createdDate = getSLDateString(new Date(o.createdAt));
+        if (startDate && createdDate < startDate) return;
+        if (endDate && createdDate > endDate) return;
+
         const s = o.status as keyof typeof stats;
         if (stats[s] !== undefined) {
           stats[s]++;
@@ -36,7 +70,7 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
       });
     }
     return stats;
-  }, [orders]);
+  }, [orders, selectedProductId, startDate, endDate]);
 
   const filters = [
     { label: 'ALL AGED LEADS', status: 'ALL', icon: <ListFilter size={14}/>, count: counts.ALL },
@@ -46,7 +80,7 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
 
   return (
     <div className="space-y-8 animate-slide-in max-w-[1400px] mx-auto pb-20">
-      <div className="flex flex-col md:flex-row justify-between items-center gap-6 px-2">
+      <div className="flex flex-col xl:flex-row justify-between items-end gap-6 px-2">
         <div className="flex items-center gap-4">
           <div className="p-4 bg-slate-900 text-white rounded-[2rem] shadow-xl rotate-3">
             <PhoneForwarded size={28} />
@@ -56,12 +90,44 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Recovery Terminal for Aging Leads</p>
           </div>
         </div>
-        <button 
-            onClick={() => setRefreshKey(prev => prev + 1)} 
-            className="p-3 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
-        >
-            <RefreshCw size={18} />
-        </button>
+
+        <div className="flex flex-col items-end gap-3 w-full xl:w-auto">
+            {/* Presets */}
+            <div className="flex gap-2 p-1 bg-white border border-slate-100 rounded-xl shadow-sm">
+                {(['TODAY', 'WEEK', 'MONTH', 'YEAR'] as const).map(p => (
+                    <button key={p} onClick={() => applyPreset(p)} className="px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all">
+                        {p}
+                    </button>
+                ))}
+            </div>
+
+            <div className="flex flex-col md:flex-row items-center gap-3 w-full">
+                {/* Product Select */}
+                <div className="bg-white px-4 py-3 rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-3 relative min-w-[200px] w-full md:w-auto">
+                    <Box size={14} className="text-slate-900" />
+                    <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} className="w-full text-[10px] font-black text-slate-900 outline-none uppercase bg-transparent cursor-pointer appearance-none">
+                        <option value="ALL">ALL PRODUCTS</option>
+                        {products.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-4 text-slate-400 pointer-events-none" />
+                </div>
+
+                {/* Date Picker */}
+                <div className="flex items-center gap-2 bg-white px-4 py-3 rounded-[1.5rem] border border-slate-200 shadow-sm w-full md:w-auto justify-center">
+                    <Calendar size={14} className="text-slate-900" />
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+                    <span className="text-[10px] font-black text-slate-300 mx-1">TO</span>
+                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+                </div>
+
+                <button 
+                    onClick={() => setRefreshKey(prev => prev + 1)} 
+                    className="p-3 bg-white border border-slate-200 rounded-[1.5rem] text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+                >
+                    <RefreshCw size={20} />
+                </button>
+            </div>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 bg-white p-2.5 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
@@ -85,6 +151,9 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
           status={activeFilter as any}
+          productId={selectedProductId === 'ALL' ? null : selectedProductId}
+          startDate={startDate}
+          endDate={endDate}
           onRefresh={() => setRefreshKey(prev => prev + 1)}
         />
       </div>

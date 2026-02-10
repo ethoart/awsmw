@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/mockBackend';
-import { Order, OrderStatus } from '../types';
+import { Order, OrderStatus, Product } from '../types';
 import { OrderList } from './OrderList';
-import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw, Calendar, AlertTriangle } from 'lucide-react';
+import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw, Calendar, AlertTriangle, Box, ChevronDown } from 'lucide-react';
 import { getSLDateString, getReturnCompletionDate } from '../utils/helpers';
 
 interface ReturnManagementProps {
@@ -18,6 +18,8 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
   const [isProcessing, setIsProcessing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('ALL');
   const scanRef = useRef<HTMLInputElement>(null);
   
   // Date Filters
@@ -28,8 +30,12 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
   const [scanResult, setScanResult] = useState<{ msg: string, type: 'success' | 'warning' | 'error' } | null>(null);
 
   const load = async () => {
-    const fetched = await db.getOrders({ tenantId, limit: 10000 });
-    setOrders(fetched.data || []);
+    const [fetchedOrders, fetchedProducts] = await Promise.all([
+        db.getOrders({ tenantId, limit: 10000 }),
+        db.getProducts(tenantId)
+    ]);
+    setOrders(fetchedOrders.data || []);
+    setProducts(fetchedProducts || []);
   };
 
   useEffect(() => {
@@ -39,6 +45,17 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
     }, 1500);
     return () => clearInterval(focusTimer);
   }, [tenantId, refreshKey]);
+
+  const applyPreset = (preset: 'TODAY' | 'WEEK' | 'MONTH' | 'YEAR') => {
+    const end = new Date();
+    const start = new Date();
+    if (preset === 'WEEK') start.setDate(end.getDate() - 7);
+    if (preset === 'MONTH') start.setMonth(end.getMonth() - 1);
+    if (preset === 'YEAR') start.setFullYear(end.getFullYear() - 1);
+    
+    setStartDate(getSLDateString(start));
+    setEndDate(getSLDateString(end));
+  };
 
   const handleScan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,20 +86,20 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
 
   const filteredOrders = useMemo(() => {
       return orders.filter(o => {
+          // Product Filter
+          if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return false;
+
           // Date Filter Logic
           if (o.status === OrderStatus.RETURN_COMPLETED) {
-              // Use robust date helper to get the actual return completion date (from timestamp or logs)
               const rawReturnDate = getReturnCompletionDate(o);
               const completedDate = getSLDateString(new Date(rawReturnDate));
               return completedDate >= startDate && completedDate <= endDate;
           } else {
-              // For pending/other returns, usually we want to see them all, or filter by created/updated
-              // Here we filter by creation date to keep it consistent if user wants history
               const createdDate = getSLDateString(new Date(o.createdAt));
               return createdDate >= startDate && createdDate <= endDate;
           }
       });
-  }, [orders, startDate, endDate]);
+  }, [orders, startDate, endDate, selectedProductId]);
 
   const counts = useMemo(() => {
     const stats = {
@@ -94,7 +111,6 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
       RETURN_COMPLETED: 0
     };
     
-    // Calculate counts based on filtered orders
     filteredOrders.forEach(o => {
         const s = o.status as keyof typeof stats;
         if (stats[s] !== undefined) {
@@ -116,7 +132,7 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
 
   return (
     <div className="space-y-8 animate-slide-in max-w-[1400px] mx-auto pb-20">
-      <div className="flex flex-col md:flex-row justify-between items-end gap-6 px-2">
+      <div className="flex flex-col xl:flex-row justify-between items-end gap-6 px-2">
         <div className="flex items-center gap-4">
           <div className="p-4 bg-blue-600 text-white rounded-[2rem] shadow-xl rotate-3">
             <RotateCcw size={28} />
@@ -127,32 +143,53 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
           </div>
         </div>
 
-        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-            {/* Date Picker */}
-            <div className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-sm">
-                <Calendar size={14} className="text-blue-600" />
-                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
-                <span className="text-[10px] font-black text-slate-300 mx-1">TO</span>
-                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+        <div className="flex flex-col items-end gap-3 w-full xl:w-auto">
+            {/* Presets */}
+            <div className="flex gap-2 p-1 bg-white border border-slate-100 rounded-xl shadow-sm">
+                {(['TODAY', 'WEEK', 'MONTH', 'YEAR'] as const).map(p => (
+                    <button key={p} onClick={() => applyPreset(p)} className="px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all">
+                        {p}
+                    </button>
+                ))}
             </div>
 
-            <form onSubmit={handleScan} className="relative w-full md:w-80">
-                <input 
-                    ref={scanRef}
-                    className="w-full bg-white border-2 border-slate-100 rounded-[1.5rem] pl-12 pr-4 py-4 text-sm font-black outline-none focus:border-blue-600 shadow-sm transition-all"
-                    value={scanInput}
-                    onChange={e => setScanInput(e.target.value)}
-                    placeholder="Scan ID to Restock & Complete..."
-                />
-                <Scan className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                {isProcessing && <div className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>}
-            </form>
-            <button 
-                onClick={() => setRefreshKey(prev => prev + 1)} 
-                className="p-4 bg-white border-2 border-slate-100 rounded-[1.5rem] text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
-            >
-                <RefreshCw size={20} />
-            </button>
+            <div className="flex flex-col md:flex-row items-center gap-3 w-full">
+                {/* Product Select */}
+                <div className="bg-white px-4 py-3 rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-3 relative min-w-[200px] w-full md:w-auto">
+                    <Box size={14} className="text-blue-600" />
+                    <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} className="w-full text-[10px] font-black text-slate-900 outline-none uppercase bg-transparent cursor-pointer appearance-none">
+                        <option value="ALL">ALL PRODUCTS</option>
+                        {products.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-4 text-slate-400 pointer-events-none" />
+                </div>
+
+                {/* Date Picker */}
+                <div className="flex items-center gap-2 bg-white px-4 py-3 rounded-[1.5rem] border border-slate-200 shadow-sm w-full md:w-auto justify-center">
+                    <Calendar size={14} className="text-blue-600" />
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+                    <span className="text-[10px] font-black text-slate-300 mx-1">TO</span>
+                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="text-[10px] font-bold outline-none bg-transparent uppercase" />
+                </div>
+
+                <form onSubmit={handleScan} className="relative w-full md:w-80">
+                    <input 
+                        ref={scanRef}
+                        className="w-full bg-white border-2 border-slate-100 rounded-[1.5rem] pl-12 pr-4 py-3 text-sm font-black outline-none focus:border-blue-600 shadow-sm transition-all"
+                        value={scanInput}
+                        onChange={e => setScanInput(e.target.value)}
+                        placeholder="Scan ID to Restock & Complete..."
+                    />
+                    <Scan className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    {isProcessing && <div className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>}
+                </form>
+                <button 
+                    onClick={() => setRefreshKey(prev => prev + 1)} 
+                    className="p-3 bg-white border-2 border-slate-100 rounded-[1.5rem] text-slate-400 hover:text-slate-900 shadow-sm transition-all active:scale-95"
+                >
+                    <RefreshCw size={20} />
+                </button>
+            </div>
         </div>
       </div>
 
@@ -182,15 +219,12 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
       </div>
 
       <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm min-h-[600px] overflow-hidden">
-        {/* Pass filtered list explicitly? OrderList fetches internally. 
-            We need to pass filters to OrderList OR use a different approach.
-            OrderList accepts startDate and endDate. We can pass those.
-        */}
         <OrderList 
           key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
           status={activeFilter as any}
+          productId={selectedProductId === 'ALL' ? null : selectedProductId}
           logisticsOnly={true}
           startDate={startDate}
           endDate={endDate}
