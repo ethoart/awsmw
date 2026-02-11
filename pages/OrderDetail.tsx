@@ -76,6 +76,11 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
           }
         }
 
+        // INTELLIGENT DEFAULT: Use item name if description is missing or generic
+        const defaultDesc = data.parcelDescription && data.parcelDescription !== 'Online Order' 
+            ? data.parcelDescription 
+            : (data.items?.[0]?.name || '');
+
         setLocalFormData({ 
           customerName: data.customerName || '', 
           customerPhone: data.customerPhone || '', 
@@ -83,7 +88,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
           customerAddress: data.customerAddress || '', 
           customerCity: initialCity, 
           parcelWeight: data.parcelWeight || '1', 
-          parcelDescription: data.parcelDescription || 'Online Order', 
+          parcelDescription: defaultDesc, 
           trackingNumber: data.trackingNumber || '', 
           createdAt: dateVal 
         });
@@ -385,6 +390,16 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, tenantId, onB
                         <div className="md:col-span-2 space-y-1.5">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Address</label>
                             <textarea className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none min-h-[100px]" value={localFormData.customerAddress} onChange={e => setLocalFormData({...localFormData, customerAddress: e.target.value})} />
+                        </div>
+                        
+                        <div className="md:col-span-2 space-y-1.5">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Content Description</label>
+                            <input 
+                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
+                                value={localFormData.parcelDescription} 
+                                onChange={(e) => setLocalFormData({...localFormData, parcelDescription: e.target.value})} 
+                                placeholder="Product content..." 
+                            />
                         </div>
                     </div>
                 </div>

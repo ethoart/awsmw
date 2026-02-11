@@ -364,12 +364,17 @@ export const handler: Handler = async (event, context) => {
         // SANITIZE: fde expects numeric order_id
         const fdeOrderId = order.id.replace(/\D/g, '').slice(-10) || Math.floor(Math.random() * 1000000000).toString();
 
+        // INTELLIGENT DESCRIPTION LOGIC: Prioritize product name if description is generic or missing
+        const productNames = order.items && order.items.length > 0 ? order.items.map((i: any) => i.name).join(' + ') : 'Standard Shipment';
+        const hasCustomDescription = order.parcelDescription && order.parcelDescription !== 'Online Order';
+        const finalDescription = hasCustomDescription ? order.parcelDescription : productNames;
+
         const formData = new URLSearchParams();
         formData.append('api_key', tenantSettings.courierApiKey.trim());
         formData.append('client_id', tenantSettings.courierClientId.trim());
         formData.append('order_id', fdeOrderId);
         formData.append('parcel_weight', order.parcelWeight || '1');
-        formData.append('parcel_description', (order.parcelDescription || order.items[0]?.name || 'Standard Shipment').toString().slice(0, 50));
+        formData.append('parcel_description', finalDescription.slice(0, 50));
         formData.append('recipient_name', order.customerName);
         formData.append('recipient_contact_1', order.customerPhone.replace(/\D/g, ''));
         
