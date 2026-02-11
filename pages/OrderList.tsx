@@ -15,6 +15,7 @@ interface OrderListProps {
   logisticsOnly?: boolean;
   onBulkAction?: (orderIds: string[]) => void;
   onRefresh?: () => void;
+  data?: Order[]; // OPTIONAL: Pass pre-filtered data to skip internal fetching
 }
 
 export const OrderList: React.FC<OrderListProps> = ({ 
@@ -26,7 +27,8 @@ export const OrderList: React.FC<OrderListProps> = ({
   endDate, 
   logisticsOnly = false, 
   onBulkAction, 
-  onRefresh 
+  onRefresh,
+  data: externalData
 }) => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -44,7 +46,7 @@ export const OrderList: React.FC<OrderListProps> = ({
   useEffect(() => {
     setCurrentPage(1);
     setSelectedIds([]);
-  }, [status, productId, startDate, endDate, debouncedSearch]);
+  }, [status, productId, startDate, endDate, debouncedSearch, externalData]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -56,22 +58,60 @@ export const OrderList: React.FC<OrderListProps> = ({
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await db.getOrders({
-        tenantId,
-        page: currentPage,
-        limit,
-        search: debouncedSearch,
-        status: status,
-        productId: productId || undefined,
-        startDate,
-        endDate
-      });
+      let finalOrders: Order[] = [];
+      let total = 0;
 
-      setOrders(response.data);
-      setTotalCount(response.total);
+      if (externalData) {
+          // CLIENT-SIDE MODE (Parent provides filtered data)
+          let filtered = [...externalData];
+          
+          // Apply Search
+          if (debouncedSearch) {
+              const term = debouncedSearch.toLowerCase();
+              filtered = filtered.filter(o => 
+                  o.id.toLowerCase().includes(term) ||
+                  o.customerName.toLowerCase().includes(term) ||
+                  o.customerPhone.includes(term) ||
+                  (o.trackingNumber || '').toLowerCase().includes(term)
+              );
+          }
+
+          // Status Filter (if not handled by parent or for extra safety)
+          if (status !== 'ALL') {
+             if (status === 'LOGISTICS_ALL') {
+                 // Handled by parent usually, but fallback here
+             } else {
+                 filtered = filtered.filter(o => o.status === status);
+             }
+          }
+
+          // Sort (Newest First)
+          filtered.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+          total = filtered.length;
+          finalOrders = filtered.slice((currentPage - 1) * limit, currentPage * limit);
+          
+      } else {
+          // SERVER-SIDE MODE (Standard Fetch)
+          const response = await db.getOrders({
+            tenantId,
+            page: currentPage,
+            limit,
+            search: debouncedSearch,
+            status: status,
+            productId: productId || undefined,
+            startDate,
+            endDate
+          });
+          finalOrders = response.data;
+          total = response.total;
+      }
+
+      setOrders(finalOrders);
+      setTotalCount(total);
       
-      if (response.data.length > 0) {
-        const uniquePhones = [...new Set(response.data.map(o => o.customerPhone))];
+      if (finalOrders.length > 0) {
+        const uniquePhones = [...new Set(finalOrders.map(o => o.customerPhone))];
         const historyResults = await Promise.all(uniquePhones.map(async (phone) => {
           const h = await db.getCustomerHistory(phone, tenantId);
           return { phone, h };
@@ -86,7 +126,7 @@ export const OrderList: React.FC<OrderListProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [tenantId, currentPage, limit, debouncedSearch, status, productId, startDate, endDate]);
+  }, [tenantId, currentPage, limit, debouncedSearch, status, productId, startDate, endDate, externalData]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -132,8 +172,6 @@ export const OrderList: React.FC<OrderListProps> = ({
         const order = orders.find(o => o.id === id);
         
         if (order) {
-            // STRICT FILTER: Only ship CONFIRMED orders. 
-            // Skips ALREADY SHIPPED and PENDING/OPEN_LEAD.
             if (order.status !== OrderStatus.CONFIRMED) {
                 console.warn(`Skipping ${order.id}: Status is ${order.status}, expected CONFIRMED.`);
                 skipCount++;
@@ -142,7 +180,6 @@ export const OrderList: React.FC<OrderListProps> = ({
 
             setBulkProgressMsg(`SHIPPING ${i+1}/${targetIds.length}: ${order.customerName}`);
             try {
-                // SEQUENTIAL DISPATCH with robust error trapping
                 await db.shipOrder(order, tenantId);
                 successCount++;
             } catch (err: any) {
@@ -150,7 +187,6 @@ export const OrderList: React.FC<OrderListProps> = ({
                 lastError = err.message;
                 console.error(`FDE Handshake failed for ${order.id}:`, err);
             }
-            // 800ms COOLDOWN: Crucial for legacy FDE PHP backend to stabilize between records
             await new Promise(r => setTimeout(r, 800));
         }
     }

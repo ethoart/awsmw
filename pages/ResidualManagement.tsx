@@ -4,7 +4,7 @@ import { db } from '../services/mockBackend';
 import { Order, OrderStatus, Product } from '../types';
 import { OrderList } from './OrderList';
 import { PhoneForwarded, ListFilter, Pause, RefreshCcw, RefreshCw, Box, ChevronDown, Calendar } from 'lucide-react';
-import { getSLDateString } from '../utils/helpers';
+import { getSLDateString, getOrderActivityDate } from '../utils/helpers';
 
 interface ResidualManagementProps {
   tenantId: string;
@@ -19,7 +19,7 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
   const [selectedProductId, setSelectedProductId] = useState<string>('ALL');
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Date Filters (Default to empty = ALL TIME for residuals usually, but allow filtering)
+  // Date Filters
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -46,31 +46,49 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
     setEndDate(getSLDateString(end));
   };
 
+  const filteredOrders = useMemo(() => {
+      return orders.filter(o => {
+          // Status filter logic
+          if (activeFilter !== 'ALL' && o.status !== activeFilter) {
+              return false;
+          } else if (activeFilter === 'ALL') {
+              if (![OrderStatus.RESIDUAL, OrderStatus.REARRANGE].includes(o.status)) return false;
+          }
+
+          // Product Filter
+          if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return false;
+
+          // Smart Date Filter Logic (Use Activity Date)
+          const activityDate = getSLDateString(new Date(getOrderActivityDate(o)));
+          if (startDate && activityDate < startDate) return false;
+          if (endDate && activityDate > endDate) return false;
+
+          return true;
+      });
+  }, [orders, activeFilter, startDate, endDate, selectedProductId]);
+
   const counts = useMemo(() => {
     const stats = {
       ALL: 0,
       RESIDUAL: 0,
       REARRANGE: 0
     };
-    if (Array.isArray(orders)) {
-      orders.forEach(o => {
-        // Product Filter
+    
+    orders.forEach(o => {
+        // Base Filters
         if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return;
-        
-        // Date Filter (using CreatedAt)
-        const createdDate = getSLDateString(new Date(o.createdAt));
-        if (startDate && createdDate < startDate) return;
-        if (endDate && createdDate > endDate) return;
+        const activityDate = getSLDateString(new Date(getOrderActivityDate(o)));
+        if (startDate && activityDate < startDate) return;
+        if (endDate && activityDate > endDate) return;
 
-        const s = o.status as keyof typeof stats;
-        if (stats[s] !== undefined) {
-          stats[s]++;
-          stats.ALL++;
+        if ([OrderStatus.RESIDUAL, OrderStatus.REARRANGE].includes(o.status)) {
+            stats.ALL++;
+            const s = o.status as keyof typeof stats;
+            if (stats[s] !== undefined) stats[s]++;
         }
-      });
-    }
+    });
     return stats;
-  }, [orders, selectedProductId, startDate, endDate]);
+  }, [orders, startDate, endDate, selectedProductId]);
 
   const filters = [
     { label: 'ALL AGED LEADS', status: 'ALL', icon: <ListFilter size={14}/>, count: counts.ALL },
@@ -150,10 +168,7 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
           key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
-          status={activeFilter as any}
-          productId={selectedProductId === 'ALL' ? null : selectedProductId}
-          startDate={startDate}
-          endDate={endDate}
+          data={filteredOrders}
           onRefresh={() => setRefreshKey(prev => prev + 1)}
         />
       </div>

@@ -52,6 +52,33 @@ export const getReturnCompletionDate = (order: Order): string => {
     return order.createdAt;
 };
 
+/**
+ * Determines the relevant "Activity Date" for an order based on its current status.
+ * Used for operational views (Returns, Residuals) where Creation Date is irrelevant.
+ */
+export const getOrderActivityDate = (order: Order): string => {
+    // 1. Explicit Timestamp Fields
+    if (order.status === 'RETURN_COMPLETED' && order.returnCompletedAt) return order.returnCompletedAt;
+    if (order.status === 'DELIVERED' && order.deliveredAt) return order.deliveredAt;
+    if (order.status === 'SHIPPED' && order.shippedAt) return order.shippedAt;
+    if (order.status === 'CONFIRMED' && order.confirmedAt) return order.confirmedAt;
+
+    // 2. Log Scanning for Status Entry
+    // Finds the most recent log that mentions the current status
+    if (order.logs && order.logs.length > 0) {
+        const currentStatus = order.status;
+        const keywords = [currentStatus, currentStatus.replace('_', ' ')];
+        
+        const relevantLog = [...order.logs].reverse().find(l => 
+            keywords.some(k => l.message.toUpperCase().includes(k))
+        );
+        if (relevantLog) return relevantLog.timestamp;
+    }
+
+    // 3. Fallback to Creation Date
+    return order.createdAt;
+};
+
 export const getCustomerStatusColor = (status: CustomerStatus) => {
   switch (status) {
     case CustomerStatus.RISK_RED: return 'bg-red-100 text-red-700 border border-red-200';
