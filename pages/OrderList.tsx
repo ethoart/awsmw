@@ -217,12 +217,15 @@ export const OrderList: React.FC<OrderListProps> = ({
       case OrderStatus.NO_ANSWER: return 'bg-amber-400 text-black';
       case OrderStatus.SHIPPED: return 'bg-indigo-600 text-white';
       case OrderStatus.HOLD: return 'bg-purple-600 text-white';
+      case OrderStatus.RETURN_TRANSFER: return 'bg-indigo-500 text-white';
+      case OrderStatus.TRANSFER: return 'bg-indigo-600 text-white';
       default: return 'bg-slate-200 text-slate-600';
     }
   };
 
   const getStatusDisplay = (status: OrderStatus) => {
       if (status === OrderStatus.RESIDUAL) return 'RESCHEDULE';
+      if (status === OrderStatus.RETURN_TRANSFER) return 'RETURN TRANSFER';
       return status.replace('_', ' ');
   };
 

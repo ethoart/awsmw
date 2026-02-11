@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { Order, OrderStatus, Product } from '../types';
 import { OrderList } from './OrderList';
-import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw, Calendar, AlertTriangle, Box, ChevronDown } from 'lucide-react';
+import { RotateCcw, Scan, RotateCw, History, CheckCircle, ListFilter, ClipboardCheck, RefreshCw, Calendar, AlertTriangle, Box, ChevronDown, ArrowRightLeft } from 'lucide-react';
 import { getSLDateString, getOrderActivityDate } from '../utils/helpers';
 
 interface ReturnManagementProps {
@@ -84,42 +84,37 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
     }
   };
 
-  const filteredOrders = useMemo(() => {
+  // Base list of orders filtered by Date and Product (Shared by Stats and List)
+  const baseFilteredOrders = useMemo(() => {
       return orders.filter(o => {
-          // Status filter handled by OrderList internally OR here. 
-          // To ensure count matches list, we filter by status HERE if activeFilter is specific.
-          // BUT OrderList expects 'ALL' to do its own thing? 
-          // No, we pass `filteredOrders` (which should match activeFilter) to OrderList as `data`.
-          
-          if (activeFilter !== 'ALL' && o.status !== activeFilter) {
-              // Special case: If activeFilter is ALL, we include all relevant return statuses
-              return false;
-          } else if (activeFilter === 'ALL') {
-              // Only include return-related statuses
-              const returnStatuses = [
-                  OrderStatus.RETURNED, OrderStatus.RETURN_TRANSFER, 
-                  OrderStatus.RETURN_AS_ON_SYSTEM, OrderStatus.RETURN_HANDOVER, 
-                  OrderStatus.RETURN_COMPLETED
-              ];
-              if (!returnStatuses.includes(o.status)) return false;
-          }
+          // 1. Must be a return status
+          const returnStatuses = [
+              OrderStatus.RETURNED, OrderStatus.RETURN_TRANSFER, 
+              OrderStatus.RETURN_AS_ON_SYSTEM, OrderStatus.RETURN_HANDOVER, 
+              OrderStatus.RETURN_COMPLETED
+          ];
+          if (!returnStatuses.includes(o.status)) return false;
 
-          // Product Filter
+          // 2. Product Filter
           if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return false;
 
-          // Smart Date Filter Logic (Use Activity Date instead of Created Date)
+          // 3. Date Filter (Activity Based)
           const activityDate = getSLDateString(new Date(getOrderActivityDate(o)));
-          
           if (startDate && activityDate < startDate) return false;
           if (endDate && activityDate > endDate) return false;
 
           return true;
       });
-  }, [orders, activeFilter, startDate, endDate, selectedProductId]);
+  }, [orders, startDate, endDate, selectedProductId]);
 
+  // List to display (further filtered by Active Tab)
+  const displayOrders = useMemo(() => {
+      if (activeFilter === 'ALL') return baseFilteredOrders;
+      return baseFilteredOrders.filter(o => o.status === activeFilter);
+  }, [baseFilteredOrders, activeFilter]);
+
+  // Statistics Counts (derived from baseFilteredOrders)
   const counts = useMemo(() => {
-    // Calculate counts for ALL orders based on date/product filter (ignoring status filter for the tabs)
-    // We need a separate pass to count tabs because `filteredOrders` is already filtered by `activeFilter`.
     const stats = {
       ALL: 0,
       RETURNED: 0,
@@ -129,27 +124,18 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
       RETURN_COMPLETED: 0
     };
     
-    orders.forEach(o => {
-        // Base Filters (Product & Date)
-        if (selectedProductId !== 'ALL' && !o.items.some(i => i.productId === selectedProductId)) return;
-        const activityDate = getSLDateString(new Date(getOrderActivityDate(o)));
-        if (startDate && activityDate < startDate) return;
-        if (endDate && activityDate > endDate) return;
-
-        // Check if it's a return order
-        if ([OrderStatus.RETURNED, OrderStatus.RETURN_TRANSFER, OrderStatus.RETURN_AS_ON_SYSTEM, OrderStatus.RETURN_HANDOVER, OrderStatus.RETURN_COMPLETED].includes(o.status)) {
-            stats.ALL++;
-            const s = o.status as keyof typeof stats;
-            if (stats[s] !== undefined) stats[s]++;
-        }
+    baseFilteredOrders.forEach(o => {
+        stats.ALL++;
+        const s = o.status as keyof typeof stats;
+        if (stats[s] !== undefined) stats[s]++;
     });
     return stats;
-  }, [orders, startDate, endDate, selectedProductId]);
+  }, [baseFilteredOrders]);
 
   const filters = [
     { label: 'ALL RETURNS', status: 'ALL', icon: <ListFilter size={14}/>, count: counts.ALL },
     { label: 'RETURNED', status: OrderStatus.RETURNED, icon: <RotateCcw size={14}/>, count: counts.RETURNED },
-    { label: 'TRANSFER', status: OrderStatus.RETURN_TRANSFER, icon: <RotateCw size={14}/>, count: counts.RETURN_TRANSFER },
+    { label: 'RETURN TRANSFER', status: OrderStatus.RETURN_TRANSFER, icon: <ArrowRightLeft size={14}/>, count: counts.RETURN_TRANSFER },
     { label: 'AS ON SYSTEM', status: OrderStatus.RETURN_AS_ON_SYSTEM, icon: <History size={14}/>, count: counts.RETURN_AS_ON_SYSTEM },
     { label: 'PENDING (HANDOVER)', status: OrderStatus.RETURN_HANDOVER, icon: <ClipboardCheck size={14}/>, count: counts.RETURN_HANDOVER },
     { label: 'COMPLETED', status: OrderStatus.RETURN_COMPLETED, icon: <CheckCircle size={14}/>, count: counts.RETURN_COMPLETED },
@@ -248,7 +234,7 @@ export const ReturnManagement: React.FC<ReturnManagementProps> = ({ tenantId, sh
           key={refreshKey}
           tenantId={tenantId} 
           onSelectOrder={onSelectOrder} 
-          data={filteredOrders}
+          data={displayOrders}
           onRefresh={() => setRefreshKey(prev => prev + 1)}
         />
       </div>

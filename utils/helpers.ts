@@ -67,11 +67,13 @@ export const getOrderActivityDate = (order: Order): string => {
     // Finds the most recent log that mentions the current status
     if (order.logs && order.logs.length > 0) {
         const currentStatus = order.status;
-        const keywords = [currentStatus, currentStatus.replace('_', ' ')];
+        const normalizedStatus = currentStatus.replace('_', ' ');
+        const keywords = [currentStatus, normalizedStatus];
         
-        const relevantLog = [...order.logs].reverse().find(l => 
-            keywords.some(k => l.message.toUpperCase().includes(k))
-        );
+        const relevantLog = [...order.logs].reverse().find(l => {
+            const msg = (l.message || '').toUpperCase();
+            return keywords.some(k => msg.includes(k.toUpperCase()));
+        });
         if (relevantLog) return relevantLog.timestamp;
     }
 
