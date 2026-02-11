@@ -221,6 +221,11 @@ export const OrderList: React.FC<OrderListProps> = ({
     }
   };
 
+  const getStatusDisplay = (status: OrderStatus) => {
+      if (status === OrderStatus.RESIDUAL) return 'RESCHEDULE';
+      return status.replace('_', ' ');
+  };
+
   const totalPages = Math.ceil(totalCount / limit);
 
   return (
@@ -332,7 +337,9 @@ export const OrderList: React.FC<OrderListProps> = ({
                   </td>
                   <td><span className="text-sm font-black text-slate-900">{formatCurrency(order.totalAmount)}</span></td>
                   <td className="text-center">
-                    <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${getStatusColor(order.status)}`}>{order.status.replace('_', ' ')}</span>
+                    <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${getStatusColor(order.status)}`}>
+                        {getStatusDisplay(order.status)}
+                    </span>
                   </td>
                   <td className="text-right pr-6">
                     <div className="flex items-center justify-end gap-2">

@@ -130,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, shopName, logoUrl, activ
               
               {SectionHeader('Operations', ['return_mgmt', 'residual_mgmt'])}
               {navItem('return_mgmt', <RotateCcw />, 'Returns Hub')}
-              {navItem('residual_mgmt', <PhoneForwarded />, 'Residual Hub')}
+              {navItem('residual_mgmt', <PhoneForwarded />, 'Reschedule Hub')}
 
               {SectionHeader('Assets', ['financials', 'inventory', 'returns'])}
               {navItem('financials', <Wallet />, 'Financials')}

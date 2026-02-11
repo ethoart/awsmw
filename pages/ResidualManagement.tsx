@@ -91,8 +91,8 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
   }, [orders, startDate, endDate, selectedProductId]);
 
   const filters = [
-    { label: 'ALL AGED LEADS', status: 'ALL', icon: <ListFilter size={14}/>, count: counts.ALL },
-    { label: 'RESIDUAL', status: OrderStatus.RESIDUAL, icon: <Pause size={14}/>, count: counts.RESIDUAL },
+    { label: 'ALL RESCHEDULED', status: 'ALL', icon: <ListFilter size={14}/>, count: counts.ALL },
+    { label: 'RESCHEDULE', status: OrderStatus.RESIDUAL, icon: <Pause size={14}/>, count: counts.RESIDUAL },
     { label: 'REARRANGE', status: OrderStatus.REARRANGE, icon: <RefreshCcw size={14}/>, count: counts.REARRANGE },
   ];
 
@@ -104,8 +104,8 @@ export const ResidualManagement: React.FC<ResidualManagementProps> = ({ tenantId
             <PhoneForwarded size={28} />
           </div>
           <div>
-            <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase leading-none">{shopName} Residuals</h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Recovery Terminal for Aging Leads</p>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase leading-none">{shopName} Reschedule</h2>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Recovery Terminal for Rescheduled Leads</p>
           </div>
         </div>
 
