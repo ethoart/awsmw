@@ -115,7 +115,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
 
       productStats[p.id] = { 
         sku: p.sku, name: p.name, salesCount: 0, confirmed: 0, 
-        shipped: 0, delivered: 0, returned: 0, upcomingReturns: 0, revenue: 0, profit: 0 
+        shipped: 0, delivered: 0, returned: 0, revenue: 0, profit: 0 
       };
     });
 
@@ -229,23 +229,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                 // Update Product Stats Return Count (Activity Based)
                 if (productStats[item.productId]) {
                     productStats[item.productId].returned += item.quantity;
-                }
-             });
-        }
-
-        // UPCOMING RETURNS STATS (Live Snapshot - irrespective of date filter)
-        // Checks for any order currently in a return-in-progress state
-        const activeReturnStatuses = [
-            OrderStatus.RETURNED, 
-            OrderStatus.RETURN_TRANSFER, 
-            OrderStatus.RETURN_AS_ON_SYSTEM, 
-            OrderStatus.RETURN_HANDOVER
-        ];
-        
-        if (activeReturnStatuses.includes(o.status)) {
-             o.items.forEach(item => {
-                if (productStats[item.productId]) {
-                    productStats[item.productId].upcomingReturns += item.quantity;
                 }
              });
         }
@@ -603,7 +586,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                             <th className="text-center">Total Leads</th>
                             <th className="text-center">Confirmed</th>
                             <th className="text-center">Delivered</th>
-                            <th className="text-center">In Return</th>
                             <th className="text-center">Restocked (Qty)</th>
                             <th className="text-right rounded-r-3xl pr-10">Net Profit (Est.)</th>
                         </tr>
@@ -620,7 +602,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ tenantId, shopName }) => {
                                 <td className="text-center"><span className="text-xs font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-lg">{formatFullNumber(p.salesCount)}</span></td>
                                 <td className="text-center"><span className="text-xs font-black text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg">{formatFullNumber(p.confirmed)}</span></td>
                                 <td className="text-center"><span className="text-xs font-black text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">{formatFullNumber(p.delivered)}</span></td>
-                                <td className="text-center"><span className="text-xs font-black text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg">{formatFullNumber(p.upcomingReturns)}</span></td>
                                 <td className="text-center"><span className="text-xs font-black text-rose-600 bg-rose-50 px-3 py-1.5 rounded-lg">{formatFullNumber(p.returned)}</span></td>
                                 <td className="text-right pr-10">
                                     <div className="flex flex-col items-end">

@@ -1,214 +1,369 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
-import { Order, OrderStatus } from '../types';
 import { db } from '../services/mockBackend';
-import { formatCurrency, getSLDateString } from '../utils/helpers';
-import { Printer, Edit, Trash2, CheckSquare, Square, Package, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Order, OrderStatus } from '../types';
+import { formatCurrency } from '../utils/helpers';
+import { Search, ChevronRight, Trash2, CheckSquare, Square, Truck, Printer, ExternalLink, ChevronLeft, Loader2 } from 'lucide-react';
 
 interface OrderListProps {
   tenantId: string;
-  onSelectOrder: (id: string) => void;
-  status?: OrderStatus | string;
+  onSelectOrder: (orderId: string) => void;
+  status?: OrderStatus | 'ALL' | 'TODAY_SHIPPED';
   productId?: string | null;
   startDate?: string;
   endDate?: string;
-  data?: Order[];
   logisticsOnly?: boolean;
-  onBulkAction?: (ids: string[]) => void;
+  onBulkAction?: (orderIds: string[]) => void;
   onRefresh?: () => void;
+  data?: Order[]; // OPTIONAL: Pass pre-filtered data to skip internal fetching
 }
-
-interface CustomerHistoryStats {
-    count: number;
-    returns: number;
-    waybills: number;
-}
-
-const CustomerHistoryBadge: React.FC<{ phone: string; tenantId: string }> = ({ phone, tenantId }) => {
-    const [history, setHistory] = useState<CustomerHistoryStats | null>(null);
-
-    useEffect(() => {
-        let isMounted = true;
-        if (phone) {
-            db.getCustomerHistory(phone, tenantId).then(h => {
-                if (isMounted) setHistory(h);
-            });
-        }
-        return () => { isMounted = false; };
-    }, [phone, tenantId]);
-
-    return (
-        <div className="flex flex-col gap-1 items-center">
-            {history && history.returns > 0 ? (
-                <div className="bg-rose-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">RISK ({history.returns})</div>
-            ) : history && history.count >= 2 ? (
-                <div className="bg-blue-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">REPEAT ({history.count})</div>
-            ) : null}
-            
-            {history && history.waybills > 0 && (
-                <div className="bg-indigo-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">
-                    WB: {history.waybills}
-                </div>
-            )}
-
-            {(!history || (!history.returns && history.count < 2 && !history.waybills)) && (
-                <span className="text-[10px] font-bold text-slate-300">-</span>
-            )}
-        </div>
-    );
-};
 
 export const OrderList: React.FC<OrderListProps> = ({ 
-    tenantId, 
-    onSelectOrder, 
-    status, 
-    productId, 
-    startDate, 
-    endDate, 
-    data, 
-    logisticsOnly,
-    onBulkAction,
-    onRefresh 
+  tenantId, 
+  onSelectOrder, 
+  status = 'ALL', 
+  productId, 
+  startDate, 
+  endDate, 
+  logisticsOnly = false, 
+  onBulkAction, 
+  onRefresh,
+  data: externalData
 }) => {
-    const [orders, setOrders] = useState<Order[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [limit] = useState(50);
+  
+  const [customerHistories, setCustomerHistories] = useState<{[key: string]: any}>({});
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkProgressMsg, setBulkProgressMsg] = useState('');
 
-    const fetchOrders = useCallback(async () => {
-        if (data) {
-            setOrders(data);
-            return;
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedIds([]);
+  }, [status, productId, startDate, endDate, debouncedSearch, externalData]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      let finalOrders: Order[] = [];
+      let total = 0;
+
+      if (externalData) {
+          // CLIENT-SIDE MODE (Parent provides filtered data)
+          let filtered = [...externalData];
+          
+          // Apply Search
+          if (debouncedSearch) {
+              const term = debouncedSearch.toLowerCase();
+              filtered = filtered.filter(o => 
+                  o.id.toLowerCase().includes(term) ||
+                  o.customerName.toLowerCase().includes(term) ||
+                  o.customerPhone.includes(term) ||
+                  (o.trackingNumber || '').toLowerCase().includes(term)
+              );
+          }
+
+          // Status Filter (if not handled by parent or for extra safety)
+          if (status !== 'ALL') {
+             if (status === 'LOGISTICS_ALL') {
+                 // Handled by parent usually, but fallback here
+             } else {
+                 filtered = filtered.filter(o => o.status === status);
+             }
+          }
+
+          // Sort (Newest First)
+          filtered.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+          total = filtered.length;
+          finalOrders = filtered.slice((currentPage - 1) * limit, currentPage * limit);
+          
+      } else {
+          // SERVER-SIDE MODE (Standard Fetch)
+          const response = await db.getOrders({
+            tenantId,
+            page: currentPage,
+            limit,
+            search: debouncedSearch,
+            status: status,
+            productId: productId || undefined,
+            startDate,
+            endDate
+          });
+          finalOrders = response.data;
+          total = response.total;
+      }
+
+      setOrders(finalOrders);
+      setTotalCount(total);
+      
+      if (finalOrders.length > 0) {
+        const uniquePhones = [...new Set(finalOrders.map(o => o.customerPhone))];
+        const historyResults = await Promise.all(uniquePhones.map(async (phone) => {
+          const h = await db.getCustomerHistory(phone, tenantId);
+          return { phone, h };
+        }));
+        
+        const historyMap: any = {};
+        historyResults.forEach(res => { 
+          historyMap[res.phone.slice(-8)] = res.h; 
+        });
+        setCustomerHistories(historyMap);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [tenantId, currentPage, limit, debouncedSearch, status, productId, startDate, endDate, externalData]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const handleOrderClick = (e: React.MouseEvent, orderId: string) => {
+    if (e.ctrlKey || e.metaKey) {
+      const url = `${window.location.origin}${window.location.pathname}?orderId=${orderId}`;
+      window.open(url, '_blank');
+    } else {
+      onSelectOrder(orderId);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`CRITICAL: Registry Wipe. Permanent removal of ${selectedIds.length} nodes. Continue?`)) return;
+    setBulkProcessing(true);
+    setBulkProgressMsg('EXECUTING WIPE...');
+    try {
+      await db.deleteOrder(selectedIds.join(','), tenantId);
+      setSelectedIds([]);
+      await loadData();
+      if (onRefresh) onRefresh();
+      alert(`Wipe Successful: Clusters purged.`);
+    } catch (e: any) {
+      alert(`Protocol Denied: ${e.message}`);
+    } finally { 
+      setBulkProcessing(false); 
+      setBulkProgressMsg('');
+    }
+  };
+
+  const handleBulkShip = async () => {
+    if (!confirm(`Logistics Sync: Transmit selected leads to Courier? Note: Only CONFIRMED orders will be processed.`)) return;
+    setBulkProcessing(true);
+    
+    let successCount = 0;
+    let failCount = 0;
+    let skipCount = 0;
+    let lastError = '';
+
+    const targetIds = [...selectedIds];
+    for (let i = 0; i < targetIds.length; i++) {
+        const id = targetIds[i];
+        const order = orders.find(o => o.id === id);
+        
+        if (order) {
+            if (order.status !== OrderStatus.CONFIRMED) {
+                console.warn(`Skipping ${order.id}: Status is ${order.status}, expected CONFIRMED.`);
+                skipCount++;
+                continue;
+            }
+
+            setBulkProgressMsg(`SHIPPING ${i+1}/${targetIds.length}: ${order.customerName}`);
+            try {
+                await db.shipOrder(order, tenantId);
+                successCount++;
+            } catch (err: any) {
+                failCount++;
+                lastError = err.message;
+                console.error(`FDE Handshake failed for ${order.id}:`, err);
+            }
+            await new Promise(r => setTimeout(r, 800));
         }
-        setLoading(true);
-        try {
-            const params: any = { tenantId, limit: 1000 };
-            if (status && status !== 'ALL') params.status = status;
-            if (productId) params.productId = productId;
-            if (startDate) params.startDate = startDate;
-            if (endDate) params.endDate = endDate;
-            
-            const res = await db.getOrders(params);
-            setOrders(res.data || []);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    }, [tenantId, status, productId, startDate, endDate, data]);
+    }
 
-    useEffect(() => {
-        fetchOrders();
-    }, [fetchOrders]);
+    setBulkProcessing(false);
+    setBulkProgressMsg('');
+    
+    let summary = `Logistics Summary:\n- Processed: ${successCount}\n- Failed: ${failCount}\n- Skipped (Not Confirmed/Already Shipped): ${skipCount}`;
+    if (failCount > 0) summary += `\n\nLast Error: ${lastError}`;
+    alert(summary);
+    
+    setSelectedIds([]);
+    await loadData();
+    if (onRefresh) onRefresh();
+  };
 
-    const toggleSelectAll = () => {
-        if (selectedIds.length === orders.length && orders.length > 0) setSelectedIds([]);
-        else setSelectedIds(orders.map(o => o.id));
-    };
+  const toggleSelectAll = () => {
+    if (selectedIds.length === orders.length && orders.length > 0) setSelectedIds([]);
+    else setSelectedIds(orders.map(o => o.id));
+  };
 
-    const toggleSelection = (id: string) => {
-        setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-    };
+  const getStatusColor = (status: OrderStatus) => {
+    switch(status) {
+      case OrderStatus.PENDING: return 'bg-blue-600 text-white';
+      case OrderStatus.OPEN_LEAD: return 'bg-sky-500 text-white';
+      case OrderStatus.CONFIRMED: return 'bg-emerald-500 text-white';
+      case OrderStatus.REJECTED: return 'bg-rose-600 text-white';
+      case OrderStatus.NO_ANSWER: return 'bg-amber-400 text-black';
+      case OrderStatus.SHIPPED: return 'bg-indigo-600 text-white';
+      case OrderStatus.HOLD: return 'bg-purple-600 text-white';
+      case OrderStatus.RETURN_TRANSFER: return 'bg-indigo-500 text-white';
+      case OrderStatus.TRANSFER: return 'bg-indigo-600 text-white';
+      default: return 'bg-slate-200 text-slate-600';
+    }
+  };
 
-    const handleDelete = async (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-        if (!confirm("Are you sure you want to delete this order?")) return;
-        await db.deleteOrder(id, tenantId);
-        if (onRefresh) onRefresh();
-        else fetchOrders();
-    };
+  const getStatusDisplay = (status: OrderStatus) => {
+      if (status === OrderStatus.RESIDUAL) return 'RESCHEDULE';
+      if (status === OrderStatus.RETURN_TRANSFER) return 'RETURN TRANSFER';
+      return status.replace('_', ' ');
+  };
 
-    return (
-        <div className="flex flex-col h-full">
-            {onBulkAction && selectedIds.length > 0 && (
-                <div className="p-4 bg-blue-50 border-b border-blue-100 flex items-center justify-between animate-slide-in">
-                    <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{selectedIds.length} Selected</span>
-                    <button onClick={() => onBulkAction(selectedIds)} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-blue-700 transition-all">
-                        <Printer size={14} /> Bulk Action
-                    </button>
-                </div>
+  const totalPages = Math.ceil(totalCount / limit);
+
+  return (
+    <div className="flex flex-col h-full bg-white animate-slide-in relative">
+      {selectedIds.length > 0 && (
+        <div className="absolute top-0 left-0 right-0 z-20 bg-slate-950 text-white p-4 flex items-center justify-between shadow-2xl rounded-b-2xl border-b border-white/10">
+          <div className="flex items-center gap-4 ml-4">
+              {bulkProcessing ? <Loader2 className="animate-spin text-blue-400" size={20}/> : <CheckSquare className="text-blue-500" size={20}/>}
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase tracking-widest">{selectedIds.length} Nodes Locked</span>
+                {bulkProgressMsg && <span className="text-[8px] font-bold text-blue-400 uppercase animate-pulse">{bulkProgressMsg}</span>}
+              </div>
+          </div>
+          <div className="flex gap-2">
+            {status === OrderStatus.CONFIRMED && (
+              <button disabled={bulkProcessing} onClick={handleBulkShip} className="bg-blue-600 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:bg-blue-700 transition-all disabled:opacity-50">
+                <Truck size={14} /> Bulk Ship
+              </button>
             )}
-            
-            <div className="flex-1 overflow-x-auto no-scrollbar">
-                <table className="w-full text-left compact-table">
-                    <thead className="bg-slate-50/50 sticky top-0 z-10 backdrop-blur-sm">
-                        <tr>
-                            <th className="w-12 text-center pl-6" onClick={toggleSelectAll}>
-                                <div className={`cursor-pointer ${selectedIds.length === orders.length && orders.length > 0 ? 'text-blue-600' : 'text-slate-300'}`}>
-                                    {selectedIds.length === orders.length && orders.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
-                                </div>
-                            </th>
-                            <th className="pl-4">Reference</th>
-                            <th>Customer Identity</th>
-                            <th className="text-center">History</th>
-                            <th>Order Details</th>
-                            <th>Status</th>
-                            <th>Value</th>
-                            <th className="text-right pr-8">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className={`divide-y divide-slate-50 ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
-                        {orders.length === 0 ? (
-                            <tr>
-                                <td colSpan={8} className="py-32 text-center">
-                                    <div className="flex flex-col items-center opacity-20">
-                                        <Package size={64} className="mb-4 stroke-1" />
-                                        <p className="text-sm font-black uppercase tracking-[0.5em]">No Orders Found</p>
-                                    </div>
-                                </td>
-                            </tr>
-                        ) : orders.map(o => (
-                            <tr key={o.id} onClick={() => onSelectOrder(o.id)} className={`hover:bg-slate-50 transition-colors group cursor-pointer ${selectedIds.includes(o.id) ? 'bg-blue-50/30' : ''}`}>
-                                <td className="pl-6 py-4 text-center" onClick={(e) => { e.stopPropagation(); toggleSelection(o.id); }}>
-                                    <div className={`transition-all ${selectedIds.includes(o.id) ? 'text-blue-600' : 'text-slate-200 group-hover:text-slate-300'}`}>
-                                        {selectedIds.includes(o.id) ? <CheckSquare size={18}/> : <Square size={18}/>}
-                                    </div>
-                                </td>
-                                <td className="pl-4 py-4">
-                                    <div className="flex flex-col">
-                                        <span className="font-mono text-[10px] font-black text-slate-400 uppercase tracking-tighter">#{o.id.slice(-6)}</span>
-                                        <span className="text-[8px] font-bold text-slate-300 uppercase mt-0.5">{new Date(o.createdAt).toLocaleDateString()}</span>
-                                    </div>
-                                </td>
-                                <td className="py-4">
-                                    <div className="flex flex-col">
-                                        <span className="font-black text-slate-900 text-[13px] uppercase tracking-tight">{o.customerName}</span>
-                                        <span className="text-[10px] font-bold text-slate-400 mt-0.5">{o.customerPhone}</span>
-                                        {o.customerCity && <span className="text-[9px] font-black text-blue-500 uppercase mt-1 flex items-center gap-1"><ArrowRight size={8}/> {o.customerCity}</span>}
-                                    </div>
-                                </td>
-                                <td className="text-center py-4">
-                                    <CustomerHistoryBadge phone={o.customerPhone} tenantId={tenantId} />
-                                </td>
-                                <td className="py-4">
-                                    <div className="flex flex-col">
-                                        <span className="text-[11px] font-black text-slate-600 truncate max-w-[200px] uppercase">{o.items[0]?.name}</span>
-                                        {o.items.length > 1 && <span className="text-[9px] font-bold text-slate-400 uppercase">+ {o.items.length - 1} More Items</span>}
-                                        {o.trackingNumber && <span className="text-[9px] font-mono font-bold text-indigo-500 uppercase mt-1">WB: {o.trackingNumber}</span>}
-                                    </div>
-                                </td>
-                                <td className="py-4">
-                                    <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${
-                                        o.status === OrderStatus.CONFIRMED ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                                        o.status === OrderStatus.REJECTED ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                                        o.status === OrderStatus.SHIPPED ? 'bg-blue-50 text-blue-600 border-blue-100' :
-                                        'bg-slate-100 text-slate-500 border-slate-200'
-                                    }`}>
-                                        {o.status.replace('_', ' ')}
-                                    </span>
-                                </td>
-                                <td className="py-4">
-                                    <span className="font-black text-slate-900 text-[13px]">{formatCurrency(o.totalAmount)}</span>
-                                </td>
-                                <td className="text-right pr-8 py-4">
-                                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"><Edit size={14}/></button>
-                                        <button onClick={(e) => handleDelete(e, o.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={14}/></button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+            {onBulkAction && (
+              <button disabled={bulkProcessing} onClick={() => { onBulkAction(selectedIds); setSelectedIds([]); }} className="bg-slate-800 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:bg-black transition-all disabled:opacity-50">
+                <Printer size={14} /> Label Print
+              </button>
+            )}
+            <button disabled={bulkProcessing} onClick={handleBulkDelete} className="bg-rose-600 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-rose-700 transition-all disabled:opacity-50">
+              <Trash2 size={14} /> Wipe Registry
+            </button>
+            <button disabled={bulkProcessing} onClick={() => setSelectedIds([])} className="bg-white/10 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase disabled:opacity-30">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row items-center justify-between gap-4 bg-slate-50/20">
+        <div className="relative flex-1 md:w-80">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input 
+              placeholder="Registry Search..." 
+              value={search} 
+              onChange={(e) => setSearch(e.target.value)} 
+              className="w-full bg-white border border-slate-200 pl-11 pr-4 py-3 rounded-2xl outline-none text-[13px] font-bold focus:ring-2 focus:ring-blue-500 shadow-sm" 
+            />
+        </div>
+        <div className="flex items-center gap-4">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Total: {totalCount.toLocaleString()} Nodes
+            </div>
+            <div className="flex items-center gap-1">
+               <button disabled={currentPage === 1 || isLoading} onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="p-2 rounded-lg hover:bg-slate-200 disabled:opacity-30"><ChevronLeft size={16}/></button>
+               <span className="text-[11px] font-black text-slate-900 bg-white border border-slate-200 px-3 py-1 rounded-lg">Page {currentPage} of {totalPages || 1}</span>
+               <button disabled={currentPage === totalPages || totalPages === 0 || isLoading} onClick={() => setCurrentPage(p => p + 1)} className="p-2 rounded-lg hover:bg-slate-200 disabled:opacity-30"><ChevronRight size={16}/></button>
             </div>
         </div>
-    );
+      </div>
+
+      <div className="flex-1 overflow-auto no-scrollbar">
+        <table className="w-full text-left compact-table">
+          <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-10 border-b border-slate-100">
+            <tr>
+              <th className="w-12 text-center" onClick={toggleSelectAll}>
+                <div className={`cursor-pointer ${selectedIds.length === orders.length && orders.length > 0 ? 'text-blue-600' : 'text-slate-300'}`}>
+                   {selectedIds.length === orders.length && orders.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
+                </div>
+              </th>
+              <th>Reference / Waybill</th>
+              <th>Consignee</th>
+              <th className="text-center">History Intel</th>
+              <th>Total</th>
+              <th className="text-center">Status</th>
+              <th className="text-right pr-6">Action</th>
+            </tr>
+          </thead>
+          <tbody className={`divide-y divide-slate-100 ${isLoading ? 'opacity-50' : ''}`}>
+            {orders.length === 0 && !isLoading && (
+              <tr><td colSpan={7} className="py-20 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest">No Records Found</td></tr>
+            )}
+            {orders.map((order) => {
+              const last8 = order.customerPhone.slice(-8);
+              const history = customerHistories[last8];
+              const isSelected = selectedIds.includes(order.id);
+              return (
+                <tr key={order.id} className={`hover:bg-slate-50 transition-colors cursor-pointer group ${isSelected ? 'bg-blue-50/50' : ''}`} onClick={(e) => handleOrderClick(e, order.id)}>
+                  <td onClick={(e) => { e.stopPropagation(); setSelectedIds(prev => prev.includes(order.id) ? prev.filter(x => x !== order.id) : [...prev, order.id]); }} className="text-center">
+                    <div className={`p-1 transition-all ${isSelected ? 'text-blue-600' : 'text-slate-300'}`}>
+                      {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="flex flex-col">
+                        <span className="font-mono text-[10px] font-bold text-slate-400">#{order.id.slice(-8)}</span>
+                        {order.trackingNumber && (
+                            <span className="text-[9px] font-black text-blue-600 mt-0.5 tracking-wider">{order.trackingNumber}</span>
+                        )}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="flex flex-col">
+                      <span className="text-[13px] font-black uppercase text-slate-900">{order.customerName}</span>
+                      <span className="text-[10px] font-bold text-slate-400">{order.customerPhone}</span>
+                    </div>
+                  </td>
+                  <td className="text-center">
+                      <div className="flex flex-col gap-1 items-center">
+                        {history?.returns > 0 ? (
+                          <div className="bg-rose-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase">RISK ({history.returns})</div>
+                        ) : history?.count >= 2 ? (
+                          <div className="bg-blue-600 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase">REPEAT ({history.count})</div>
+                        ) : <span className="text-[10px] font-bold text-slate-300">-</span>}
+                      </div>
+                  </td>
+                  <td><span className="text-sm font-black text-slate-900">{formatCurrency(order.totalAmount)}</span></td>
+                  <td className="text-center">
+                    <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${getStatusColor(order.status)}`}>
+                        {getStatusDisplay(order.status)}
+                    </span>
+                  </td>
+                  <td className="text-right pr-6">
+                    <div className="flex items-center justify-end gap-2">
+                        <ExternalLink size={14} className="text-slate-300 group-hover:text-blue-600 transition-all" />
+                        <button className="p-2.5 rounded-xl bg-slate-50 text-slate-400 group-hover:text-blue-600 transition-all"><ChevronRight size={16}/></button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      
+      <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Showing {orders.length} of {totalCount.toLocaleString()} results</div>
+          <div className="flex items-center gap-2">
+            <button disabled={currentPage === 1 || isLoading} onClick={() => setCurrentPage(1)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase hover:bg-slate-200 disabled:opacity-30">First</button>
+            <button disabled={currentPage === totalPages || totalPages === 0 || isLoading} onClick={() => setCurrentPage(totalPages)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase hover:bg-slate-200 disabled:opacity-30">Last</button>
+          </div>
+      </div>
+    </div>
+  );
 };
