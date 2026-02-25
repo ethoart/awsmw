@@ -46,23 +46,13 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
 
   const dailyOrders = useMemo(() => {
       if (!Array.isArray(orders)) return [];
-      
-      const filtered = orders.filter(o => {
-          const shippedDate = o.shippedAt ? getSLDateString(new Date(o.shippedAt)) : '';
-          if (shippedDate !== targetDate) return false;
-
+      return orders.filter(o => {
           const matchesSearch = o.customerName.toLowerCase().includes(search.toLowerCase()) || 
                                 o.id.includes(search) || 
                                 o.trackingNumber?.includes(search);
           return matchesSearch;
       });
-
-      return filtered.sort((a, b) => {
-          const timeA = a.shippedAt ? new Date(a.shippedAt).getTime() : 0;
-          const timeB = b.shippedAt ? new Date(b.shippedAt).getTime() : 0;
-          return timeB - timeA;
-      });
-  }, [orders, search, targetDate]);
+  }, [orders, search]);
 
   const toggleSelectAll = () => {
     if (selectedIds.length === dailyOrders.length && dailyOrders.length > 0) setSelectedIds([]);
@@ -209,16 +199,9 @@ export const TodayShipped: React.FC<TodayShippedProps> = ({ tenantId, shopName }
                                     </div>
                                 </td>
                                 <td className="text-center py-6">
-                                    <div className="flex flex-col items-center">
-                                        <span className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border border-white/10">
-                                            {o.status}
-                                        </span>
-                                        {o.shippedAt && (
-                                            <span className="text-[10px] font-bold text-slate-500 mt-1">
-                                                {new Date(o.shippedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                            </span>
-                                        )}
-                                    </div>
+                                    <span className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border border-white/10">
+                                        {o.status}
+                                    </span>
                                 </td>
                                 <td className="py-6">
                                     <span className="font-black text-slate-900 text-[14px]">{formatCurrency(o.totalAmount)}</span>

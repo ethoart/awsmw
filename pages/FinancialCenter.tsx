@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '../services/mockBackend';
 import { Order, OrderStatus, Product } from '../types';
-import { formatCurrency, getSLDateString, getOrderActivityDate, getReturnCompletionDate } from '../utils/helpers';
+import { formatCurrency } from '../utils/helpers';
 import { 
   Wallet, 
   Calculator, 
@@ -16,8 +16,7 @@ import {
   Calendar,
   Users,
   Package,
-  RefreshCw,
-  RotateCcw
+  RefreshCw
 } from 'lucide-react';
 
 interface FinancialCenterProps {
@@ -33,15 +32,15 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(1); 
-    return getSLDateString(d);
+    return d.toISOString().split('T')[0];
   });
-  const [endDate, setEndDate] = useState(getSLDateString());
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [deliveryFee, setDeliveryFee] = useState(350);
   const [returnFee, setReturnFee] = useState(150);
   const [manualExpenses, setManualExpenses] = useState(0);
   const [advertisingCosts, setAdvertisingCosts] = useState(0);
-  const [workerCount, setWorkerCount] = useState(3); // Default set to 3
+  const [workerCount, setWorkerCount] = useState(1);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,41 +62,26 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
   useEffect(() => { load(); }, [load]);
 
   const financialData = useMemo(() => {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59);
+
     if (!Array.isArray(orders)) return {
       grossRevenue: 0, totalCogs: 0, grossProfit: 0, deliveredCount: 0, returnedCount: 0,
       totalDeliveryDeduction: 0, totalReturnDeduction: 0, netProfit: 0, investorShare: 0,
       workerSharePool: 0, perWorkerProfit: 0, orderCount: 0
     };
 
-    // LOGIC UPDATE: Filter based on STATUS CHANGE DATE, not creation date.
-    // This ensures accurate P&L based on when money/stock actually moved.
-
-    // 1. Calculate Delivered Revenue (Based on Delivery Date)
-    const deliveredOrders = orders.filter(o => {
-        if (o.status !== OrderStatus.DELIVERED) return false;
-        
-        // Use DeliveredAt if available, otherwise fallback to activity helper
-        const dateRaw = o.deliveredAt || getOrderActivityDate(o); 
-        const activityDate = getSLDateString(new Date(dateRaw));
-        
-        return activityDate >= startDate && activityDate <= endDate;
+    const filtered = orders.filter(o => {
+      const d = new Date(o.createdAt);
+      return d >= start && d <= end;
     });
 
-    // 2. Calculate Returns (Based on Return Processed Date)
-    const returnedOrders = orders.filter(o => {
-        const returnStatuses = [
-            OrderStatus.RETURNED, 
-            OrderStatus.RETURN_COMPLETED, 
-            OrderStatus.RETURN_AS_ON_SYSTEM
-        ];
-        if (!returnStatuses.includes(o.status)) return false;
-
-        // Use strict return completion date helper
-        const dateRaw = getReturnCompletionDate(o);
-        const activityDate = getSLDateString(new Date(dateRaw));
-
-        return activityDate >= startDate && activityDate <= endDate;
-    });
+    const deliveredOrders = filtered.filter(o => o.status === OrderStatus.DELIVERED);
+    const returnedOrders = filtered.filter(o => 
+      o.status === OrderStatus.RETURNED || 
+      o.status === OrderStatus.RETURN_COMPLETED
+    );
 
     const grossRevenue = deliveredOrders.reduce((s, o) => s + o.totalAmount, 0);
     
@@ -136,7 +120,7 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
       investorShare,
       workerSharePool,
       perWorkerProfit,
-      orderCount: deliveredCount + returnedCount // Total activity count
+      orderCount: filtered.length
     };
   }, [orders, products, startDate, endDate, deliveryFee, returnFee, manualExpenses, advertisingCosts, workerCount]);
 
@@ -274,20 +258,10 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
               </div>
             </div>
             
-            <div className="modern-card p-8 bg-white border border-slate-200 flex flex-col justify-between shadow-sm">
-                <div>
-                    <p className="text-[10px] font-black text-rose-600 uppercase tracking-[0.2em] mb-1">Returns Processed</p>
-                    <h3 className="text-4xl font-black text-slate-900 tracking-tighter">{financialData.returnedCount}</h3>
-                </div>
-                <div className="mt-4 flex items-center gap-2 text-rose-500 text-[10px] font-black uppercase">
-                    <RotateCcw size={14} /> {formatCurrency(financialData.totalReturnDeduction)} in Fees
-                </div>
-            </div>
-
-            <div className="md:col-span-2 modern-card p-8 bg-blue-600 text-white border-none shadow-xl shadow-blue-200 flex flex-col justify-between">
+            <div className="modern-card p-8 bg-blue-600 text-white border-none shadow-xl shadow-blue-200 flex flex-col justify-between">
               <div>
                 <p className="text-[10px] font-black text-blue-200 uppercase tracking-[0.2em] mb-1">Net Profit Pool</p>
-                <h3 className="text-5xl font-black tracking-tighter">{formatCurrency(financialData.netProfit)}</h3>
+                <h3 className="text-4xl font-black tracking-tighter">{formatCurrency(financialData.netProfit)}</h3>
               </div>
               <div className="mt-4 flex items-center gap-2 text-blue-200 text-[10px] font-black uppercase">
                 <TrendingUp size={14} /> 
@@ -306,7 +280,7 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
             
             <div className="p-6 space-y-3">
               <div className="flex justify-between items-center py-2">
-                <span className="text-xs font-bold text-slate-600">Total Sales Revenue (Delivered Only)</span>
+                <span className="text-xs font-bold text-slate-600">Total Sales Revenue</span>
                 <span className="text-sm font-black text-slate-900">{formatCurrency(financialData.grossRevenue)}</span>
               </div>
               <div className="flex justify-between items-center py-2 text-rose-600 bg-rose-50 px-3 rounded-lg">
@@ -390,7 +364,7 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
         <div className="space-y-8">
             <div className="grid grid-cols-2 gap-8">
                 <div className="p-6 border-2 border-slate-100 rounded-3xl">
-                    <p className="text-xs font-black uppercase text-slate-400 mb-1">Gross Revenue (Delivered)</p>
+                    <p className="text-xs font-black uppercase text-slate-400 mb-1">Gross Revenue</p>
                     <p className="text-3xl font-black">{formatCurrency(financialData.grossRevenue)}</p>
                 </div>
                 <div className="p-6 bg-slate-900 text-white rounded-3xl">
@@ -407,7 +381,7 @@ export const FinancialCenter: React.FC<FinancialCenterProps> = ({ tenantId, shop
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                    <tr><td className="py-4 font-bold">Total Sales (Delivered Activity)</td><td className="py-4 text-right font-black">{formatCurrency(financialData.grossRevenue)}</td></tr>
+                    <tr><td className="py-4 font-bold">Total Sales (Delivered)</td><td className="py-4 text-right font-black">{formatCurrency(financialData.grossRevenue)}</td></tr>
                     <tr><td className="py-4 font-bold">Cost of Goods Sold (COGS)</td><td className="py-4 text-right font-black text-rose-600">({formatCurrency(financialData.totalCogs)})</td></tr>
                     <tr className="bg-slate-50"><td className="py-4 font-black uppercase">Gross Profit</td><td className="py-4 text-right font-black">{formatCurrency(financialData.grossProfit)}</td></tr>
                     <tr><td className="py-4 font-bold">Delivery Fees ({financialData.deliveredCount} parcels)</td><td className="py-4 text-right font-black text-rose-600">-{formatCurrency(financialData.totalDeliveryDeduction)}</td></tr>
